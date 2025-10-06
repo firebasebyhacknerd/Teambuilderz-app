@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  tbz_postgres:
+    image: postgres:15-alpine
+    container_name: tbz_postgres
+    environment:
+      POSTGRES_USER: teambuilderz_user
+      POSTGRES_PASSWORD: teambuilderz_password
+      POSTGRES_DB: teambuilderz
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U teambuilderz_user"] 
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  tbz_backend:
+    build: 
+      context: ./backend 
+      dockerfile: Dockerfile
+    container_name: tbz_backend
+    ports:
+      - "3001:3001"
+    environment:
+      DB_HOST: tbz_postgres
+      DB_PORT: 5432
+      DB_USER: teambuilderz_user
+      DB_PASSWORD: teambuilderz_password
+      DB_NAME: teambuilderz
+      JWT_SECRET: your_super_secret_jwt_key_here_change_in_production
+      ADMIN_PASSWORD: admin123
+      RECRUITER_PASSWORD: recruit123
+    depends_on:
+      tbz_postgres:
+        condition: service_healthy
+
+  tbz_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tbz_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - tbz_backend
+    
+volumes:
+  postgres_data:
