@@ -5,7 +5,7 @@ import Input from '../../components/UI/Input';
 import { Plus, Search, Filter, Eye, Edit, Calendar, Building, Briefcase, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { useRouter } from 'next/router';
 
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
 
 const ApplicationsPage = () => {
   const router = useRouter();

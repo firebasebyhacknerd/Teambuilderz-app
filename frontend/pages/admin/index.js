@@ -10,6 +10,8 @@ const AdminDashboard = () => {
   const router = useRouter();
   const [candidates, setCandidates] = useState([]);
   const [performance, setPerformance] = useState([]);
+  const [weeklyPerformance, setWeeklyPerformance] = useState([]);
+  const [monthlyPerformance, setMonthlyPerformance] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const userName = typeof window !== 'undefined' ? localStorage.getItem('userName') : 'Admin';
@@ -37,9 +39,22 @@ const AdminDashboard = () => {
       }
     };
 
+    // Weekly: last 7 days
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(today.getDate() - 6);
+    const weekFrom = weekAgo.toISOString().split('T')[0];
+    const weekTo = today.toISOString().split('T')[0];
+
+    // Monthly: first day of month to today
+    const monthFrom = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+    const monthTo = today.toISOString().split('T')[0];
+
     Promise.all([
       fetchData('/api/v1/candidates', setCandidates),
       fetchData('/api/v1/reports/performance', setPerformance),
+      fetchData(`/api/v1/reports/performance?date_from=${weekFrom}&date_to=${weekTo}`, setWeeklyPerformance),
+      fetchData(`/api/v1/reports/performance?date_from=${monthFrom}&date_to=${monthTo}`, setMonthlyPerformance),
       fetchData('/api/v1/alerts', setAlerts)
     ]).finally(() => setLoading(false));
 
@@ -51,6 +66,10 @@ const AdminDashboard = () => {
   const totalAppsToday = performance.reduce((sum, r) => sum + parseInt(r.avg_apps_per_day || 0), 0);
   const openAlerts = alerts.filter(a => a.status === 'open').length;
 
+  // Calculate weekly and monthly averages for all recruiters
+  const weeklyAvg = weeklyPerformance.length > 0 ? Math.round(weeklyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / weeklyPerformance.length) : 0;
+  const monthlyAvg = monthlyPerformance.length > 0 ? Math.round(monthlyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / monthlyPerformance.length) : 0;
+
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading Admin Dashboard...</div>;
 
@@ -58,10 +77,12 @@ const AdminDashboard = () => {
     <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
       <Header title="Admin Dashboard" userName={userName} />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-10">
         <KpiCard icon={<Users />} title="Total Candidates" value={totalCandidates} color="bg-blue-500" />
         <KpiCard icon={<Briefcase />} title="Total Recruiters" value={totalRecruiters} color="bg-green-500" />
         <KpiCard icon={<BarChart3 />} title="Total Applications" value={totalApplications} color="bg-purple-500" />
+        <KpiCard icon={<Target />} title="Weekly Avg Apps/Day" value={weeklyAvg} color="bg-yellow-500" />
+        <KpiCard icon={<Target />} title="Monthly Avg Apps/Day" value={monthlyAvg} color="bg-pink-500" />
         <KpiCard icon={<AlertTriangle />} title="Open Alerts" value={openAlerts} color="bg-red-500" />
       </div>
 

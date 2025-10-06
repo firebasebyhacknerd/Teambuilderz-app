@@ -4,7 +4,7 @@ import Card from '../../../components/UI/Card';
 import Button from '../../../components/UI/Button';
 import { ArrowLeft, User, Briefcase, Calendar, Target, TrendingUp, Edit, Save, X } from 'lucide-react';
 
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
 
 const CandidateDetailPage = () => {
   const router = useRouter();
