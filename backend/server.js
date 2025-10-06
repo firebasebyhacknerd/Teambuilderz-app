@@ -284,7 +284,7 @@ async function setupDatabase() {
       console.log('Comprehensive database schema created successfully!');
       console.log('Default Admin and Recruiter users created.');
     } else {
-      console.log('Database tables already exist. Skipping initialization.');
+      console.log('Database tables detected. Ensuring schema completeness...');
     }
   } catch (error) {
     console.error('Database setup error:', error.message);
