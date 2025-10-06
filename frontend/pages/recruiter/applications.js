@@ -16,42 +16,89 @@ const ApplicationsPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const statuses = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 
-  useEffect(() => {
+  const fetchData = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
       return;
     }
 
-    const fetchData = async () => {
-      try {
-        const [applicationsRes, candidatesRes] = await Promise.all([
-          fetch(`${API_URL}/api/v1/applications`, { headers: { 'Authorization': `Bearer ${token}` } }),
-          fetch(`${API_URL}/api/v1/candidates`, { headers: { 'Authorization': `Bearer ${token}` } })
-        ]);
+    try {
+      setLoading(true);
+      setError('');
 
-        if (applicationsRes.status === 401 || applicationsRes.status === 403) {
-          router.push('/login');
-          return;
-        }
+      const [applicationsRes, candidatesRes] = await Promise.all([
+        fetch(`${API_URL}/api/v1/applications`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/v1/candidates`, { headers: { Authorization: `Bearer ${token}` } })
+      ]);
 
-        const applicationsData = await applicationsRes.json();
-        const candidatesData = await candidatesRes.json();
-        
-        setApplications(applicationsData);
-        setCandidates(candidatesData);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-      } finally {
-        setLoading(false);
+      if (applicationsRes.status === 401 || applicationsRes.status === 403) {
+        router.push('/login');
+        return;
       }
-    };
 
+      const applicationsData = await applicationsRes.json();
+      const candidatesData = await candidatesRes.json();
+
+      setApplications(applicationsData);
+      setCandidates(candidatesData);
+    } catch (fetchError) {
+      console.error('Error fetching data:', fetchError);
+      setError('Unable to load applications. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSaveApplication = async (formData) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError('');
+
+      const payload = {
+        ...formData,
+        candidate_id: formData.candidate_id ? Number(formData.candidate_id) : null
+      };
+
+      const response = await fetch(`${API_URL}/api/v1/applications`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Failed to create application.');
+      }
+
+      await fetchData();
+      setShowCreateModal(false);
+    } catch (saveError) {
+      console.error('Error saving application:', saveError);
+      setError(saveError.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const filteredApplications = applications.filter(application => {
     const matchesSearch = application.candidate_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -97,6 +144,12 @@ const ApplicationsPage = () => {
         <h1 className="text-3xl font-bold text-gray-900">Application Management</h1>
         <p className="text-gray-600 mt-2">Track and manage all job applications</p>
       </div>
+
+      {error && !showCreateModal && (
+        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
+          {error}
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -182,7 +235,13 @@ const ApplicationsPage = () => {
             onChange={(e) => setDateFilter(e.target.value)}
             placeholder="Filter by date"
           />
-          <Button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2">
+          <Button
+            onClick={() => {
+              setError('');
+              setShowCreateModal(true);
+            }}
+            className="flex items-center gap-2"
+          >
             <Plus size={20} />
             Log Application
           </Button>
@@ -272,19 +331,20 @@ const ApplicationsPage = () => {
       {showCreateModal && (
         <ApplicationModal
           candidates={candidates}
-          onClose={() => setShowCreateModal(false)}
-          onSave={(application) => {
-            // Handle save logic
-            console.log('Save application:', application);
+          error={error}
+          isSaving={saving}
+          onClose={() => {
             setShowCreateModal(false);
+            setError('');
           }}
+          onSave={handleSaveApplication}
         />
       )}
     </div>
   );
 };
 
-const ApplicationModal = ({ candidates, onClose, onSave }) => {
+const ApplicationModal = ({ candidates, onClose, onSave, isSaving, error }) => {
   const [formData, setFormData] = useState({
     candidate_id: '',
     company_name: '',
@@ -354,12 +414,17 @@ const ApplicationModal = ({ candidates, onClose, onSave }) => {
               onChange={(e) => setFormData({...formData, channel: e.target.value})}
             />
           </div>
+          {error && (
+            <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit">
-              Log Application
+            <Button type="submit" disabled={isSaving}>
+              {isSaving ? 'Saving...' : 'Log Application'}
             </Button>
           </div>
         </form>

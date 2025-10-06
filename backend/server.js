@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const app = express();
-const port = 3001;
+const port = process.env.BACKEND_PORT || 3001;
 const SECRET_KEY = process.env.JWT_SECRET;
 if (!SECRET_KEY) {
   console.error('JWT_SECRET environment variable is required');
@@ -411,13 +411,36 @@ app.post('/api/v1/candidates', verifyToken, async (req, res) => {
 app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phone, visa_status, skills, experience_years, current_stage, marketing_start_date, assigned_recruiter_id } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      visa_status,
+      skills,
+      experience_years,
+      current_stage,
+      marketing_start_date,
+      assigned_recruiter_id
+    } = req.body;
 
     // Get old values for audit
     const oldResult = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ message: 'Candidate not found' });
     }
+
+    const oldCandidate = oldResult.rows[0];
+    const updatedCandidate = {
+      name: name ?? oldCandidate.name,
+      email: email ?? oldCandidate.email,
+      phone: phone ?? oldCandidate.phone,
+      visa_status: visa_status ?? oldCandidate.visa_status,
+      skills: skills ?? oldCandidate.skills,
+      experience_years: experience_years ?? oldCandidate.experience_years,
+      current_stage: current_stage ?? oldCandidate.current_stage,
+      marketing_start_date: marketing_start_date ?? oldCandidate.marketing_start_date,
+      assigned_recruiter_id: assigned_recruiter_id ?? oldCandidate.assigned_recruiter_id
+    };
 
     const result = await pool.query(`
       UPDATE candidates 
@@ -426,17 +449,56 @@ app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
           assigned_recruiter_id = $9, updated_at = CURRENT_TIMESTAMP
       WHERE id = $10
       RETURNING *
-    `, [name, email, phone, visa_status, skills, experience_years, current_stage, marketing_start_date, assigned_recruiter_id, id]);
+    `, [
+      updatedCandidate.name,
+      updatedCandidate.email,
+      updatedCandidate.phone,
+      updatedCandidate.visa_status,
+      updatedCandidate.skills,
+      updatedCandidate.experience_years,
+      updatedCandidate.current_stage,
+      updatedCandidate.marketing_start_date,
+      updatedCandidate.assigned_recruiter_id,
+      id
+    ]);
 
     // Log audit
     await pool.query(`
       INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
       VALUES ($1, 'UPDATE', 'candidates', $2, $3, $4)
-    `, [req.user.userId, id, JSON.stringify(oldResult.rows[0]), JSON.stringify(result.rows[0])]);
+    `, [req.user.userId, id, JSON.stringify(oldCandidate), JSON.stringify(result.rows[0])]);
 
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating candidate:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// Delete candidate (Admin only)
+app.delete('/api/v1/candidates/:id', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'Admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const { id } = req.params;
+    const candidateResult = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
+
+    if (candidateResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Candidate not found' });
+    }
+
+    await pool.query('DELETE FROM candidates WHERE id = $1', [id]);
+
+    await pool.query(`
+      INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+      VALUES ($1, 'DELETE', 'candidates', $2, $3, $4)
+    `, [req.user.userId, id, JSON.stringify(candidateResult.rows[0]), null]);
+
+    res.json({ message: 'Candidate deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting candidate:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -733,6 +795,69 @@ app.get('/api/v1/alerts', verifyToken, async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching alerts:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.patch('/api/v1/alerts/:id/acknowledge', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const alertResult = await pool.query('SELECT * FROM alerts WHERE id = $1', [id]);
+
+    if (alertResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Alert not found' });
+    }
+
+    const alert = alertResult.rows[0];
+    if (alert.user_id !== req.user.userId && req.user.role !== 'Admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    if (alert.status === 'resolved') {
+      return res.status(400).json({ message: 'Resolved alerts cannot be acknowledged' });
+    }
+
+    const updated = await pool.query(`
+      UPDATE alerts
+      SET status = 'acknowledged',
+          acknowledged_at = COALESCE(acknowledged_at, CURRENT_TIMESTAMP)
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+
+    res.json(updated.rows[0]);
+  } catch (error) {
+    console.error('Error acknowledging alert:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.patch('/api/v1/alerts/:id/resolve', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const alertResult = await pool.query('SELECT * FROM alerts WHERE id = $1', [id]);
+
+    if (alertResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Alert not found' });
+    }
+
+    const alert = alertResult.rows[0];
+    if (alert.user_id !== req.user.userId && req.user.role !== 'Admin') {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const updated = await pool.query(`
+      UPDATE alerts
+      SET status = 'resolved',
+          acknowledged_at = COALESCE(acknowledged_at, CURRENT_TIMESTAMP),
+          resolved_at = CURRENT_TIMESTAMP
+      WHERE id = $1
+      RETURNING *
+    `, [id]);
+
+    res.json(updated.rows[0]);
+  } catch (error) {
+    console.error('Error resolving alert:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

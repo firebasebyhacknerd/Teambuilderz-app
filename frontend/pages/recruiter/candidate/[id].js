@@ -1,10 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import Card from '../../../components/UI/Card';
 import Button from '../../../components/UI/Button';
-import { ArrowLeft, User, Briefcase, Calendar, Target, TrendingUp, Edit, Save, X } from 'lucide-react';
+import { ArrowLeft, User, Briefcase, Target, TrendingUp, Edit, Save, X } from 'lucide-react';
 
 const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
+
+const formatStage = (stage) => {
+  if (!stage) return 'N/A';
+  return stage
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+};
+
+const getStageColor = (stage) => {
+  const colors = {
+    onboarding: 'bg-blue-100 text-blue-800',
+    marketing: 'bg-yellow-100 text-yellow-800',
+    interviewing: 'bg-purple-100 text-purple-800',
+    offered: 'bg-green-100 text-green-800',
+    placed: 'bg-emerald-100 text-emerald-800',
+    inactive: 'bg-gray-100 text-gray-800'
+  };
+  return colors[stage] || 'bg-blue-100 text-blue-800';
+};
 
 const CandidateDetailPage = () => {
   const router = useRouter();
@@ -112,6 +132,8 @@ const CandidateDetailPage = () => {
     );
   }
 
+  const stageLabel = useMemo(() => formatStage(candidate.current_stage), [candidate.current_stage]);
+  const primarySkill = useMemo(() => candidate.skills?.[0] || 'N/A', [candidate.skills]);
   return (
     <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
       <div className="max-w-4xl mx-auto">
@@ -126,16 +148,14 @@ const CandidateDetailPage = () => {
             </button>
             <div>
               <h1 className="text-3xl font-bold text-gray-900">{candidate.name}</h1>
-              <p className="text-gray-600">{candidate.technology_primary}</p>
+              <p className="text-gray-600">{candidate.email}</p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-              candidate.status === 'Active' 
-                ? 'bg-green-100 text-green-800' 
-                : 'bg-gray-100 text-gray-800'
-            }`}>
-              {candidate.status}
+            <span
+              className={`px-3 py-1 rounded-full text-sm font-medium ${getStageColor(candidate.current_stage)}`}
+            >
+              {stageLabel}
             </span>
           </div>
         </div>
@@ -190,8 +210,8 @@ const CandidateDetailPage = () => {
                     <Briefcase className="w-6 h-6 text-green-600" />
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">Primary Technology</p>
-                    <p className="font-semibold text-gray-800">{candidate.technology_primary}</p>
+                    <p className="text-sm text-gray-500">Primary Skill</p>
+                    <p className="font-semibold text-gray-800">{primarySkill}</p>
                   </div>
                 </div>
               </div>

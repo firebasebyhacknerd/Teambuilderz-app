@@ -11,36 +11,43 @@ const AlertsPage = () => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  const [processingAlertId, setProcessingAlertId] = useState(null);
+  const [actionError, setActionError] = useState('');
 
-  useEffect(() => {
+  const fetchAlerts = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
       return;
     }
 
-    const fetchAlerts = async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/v1/alerts`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+    try {
+      setLoading(true);
+      setActionError('');
 
-        if (response.status === 401 || response.status === 403) {
-          router.push('/login');
-          return;
-        }
+      const response = await fetch(`${API_URL}/api/v1/alerts`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
 
-        const data = await response.json();
-        setAlerts(data);
-      } catch (error) {
-        console.error('Error fetching alerts:', error);
-      } finally {
-        setLoading(false);
+      if (response.status === 401 || response.status === 403) {
+        router.push('/login');
+        return;
       }
-    };
 
+      const data = await response.json();
+      setAlerts(data);
+    } catch (error) {
+      console.error('Error fetching alerts:', error);
+      setActionError('Unable to load alerts. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchAlerts();
-  }, [router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filteredAlerts = alerts.filter(alert => 
     !statusFilter || alert.status === statusFilter
@@ -77,15 +84,42 @@ const AlertsPage = () => {
     return colors[priority] || 'text-gray-600';
   };
 
-  const handleAcknowledge = async (alertId) => {
-    // Implement acknowledge logic
-    console.log('Acknowledge alert:', alertId);
+  const handleAlertAction = async (alertId, action) => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      router.push('/login');
+      return;
+    }
+
+    try {
+      setProcessingAlertId(alertId);
+      setActionError('');
+
+      const response = await fetch(`${API_URL}/api/v1/alerts/${alertId}/${action}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || 'Unable to update alert.');
+      }
+
+      const updatedAlert = await response.json();
+      setAlerts((prev) =>
+        prev.map((alert) => (alert.id === updatedAlert.id ? updatedAlert : alert))
+      );
+    } catch (error) {
+      console.error(`Error updating alert (${action}):`, error);
+      setActionError(error.message);
+    } finally {
+      setProcessingAlertId(null);
+    }
   };
 
-  const handleResolve = async (alertId) => {
-    // Implement resolve logic
-    console.log('Resolve alert:', alertId);
-  };
+  const handleAcknowledge = (alertId) => handleAlertAction(alertId, 'acknowledge');
+
+  const handleResolve = (alertId) => handleAlertAction(alertId, 'resolve');
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Loading alerts...</div>;
 
@@ -95,6 +129,12 @@ const AlertsPage = () => {
         <h1 className="text-3xl font-bold text-gray-900">Alerts & Notifications</h1>
         <p className="text-gray-600 mt-2">Stay updated with important notifications and alerts</p>
       </div>
+
+      {actionError && (
+        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
+          {actionError}
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -226,21 +266,23 @@ const AlertsPage = () => {
                     <Button
                       size="sm"
                       variant="outline"
+                      disabled={processingAlertId === alert.id}
                       onClick={() => handleAcknowledge(alert.id)}
                       className="flex items-center space-x-1"
                     >
                       <CheckCircle size={16} />
-                      <span>Acknowledge</span>
+                      <span>{processingAlertId === alert.id ? 'Updating...' : 'Acknowledge'}</span>
                     </Button>
                   )}
                   {alert.status === 'acknowledged' && (
                     <Button
                       size="sm"
+                      disabled={processingAlertId === alert.id}
                       onClick={() => handleResolve(alert.id)}
                       className="flex items-center space-x-1"
                     >
                       <CheckCircle size={16} />
-                      <span>Resolve</span>
+                      <span>{processingAlertId === alert.id ? 'Updating...' : 'Resolve'}</span>
                     </Button>
                   )}
                 </div>
