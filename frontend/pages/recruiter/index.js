@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import Card from '../../components/UI/Card';
 import { UserCheck, ChevronRight, LogOut } from 'lucide-react';
 import { useRouter } from 'next/router';
-
-const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
+import API_URL from '../../lib/api';
 const DAILY_TARGET = 60;
 
 const RecruiterDashboard = () => {

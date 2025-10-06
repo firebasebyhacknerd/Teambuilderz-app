@@ -3,8 +3,7 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { Users, Briefcase, ChevronRight, BarChart3, Target, UserPlus, FileText, Calendar, AlertTriangle, Settings, Plus, LogOut } from 'lucide-react';
 import { useRouter } from 'next/router';
-
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+import API_URL from '../../lib/api';
 
 const AdminDashboard = () => {
   const router = useRouter();

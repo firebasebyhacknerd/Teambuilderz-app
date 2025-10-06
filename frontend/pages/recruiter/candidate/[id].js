@@ -3,8 +3,7 @@ import { useRouter } from 'next/router';
 import Card from '../../../components/UI/Card';
 import Button from '../../../components/UI/Button';
 import { ArrowLeft, User, Briefcase, Target, TrendingUp, Edit, Save, X } from 'lucide-react';
-
-const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
+import API_URL from '../../../lib/api';
 
 const formatStage = (stage) => {
   if (!stage) return 'N/A';

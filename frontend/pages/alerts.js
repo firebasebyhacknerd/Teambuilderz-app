@@ -3,8 +3,7 @@ import Card from '../components/UI/Card';
 import Button from '../components/UI/Button';
 import { Bell, AlertTriangle, CheckCircle, Clock, Target, Calendar, X } from 'lucide-react';
 import { useRouter } from 'next/router';
-
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+import API_URL from '../lib/api';
 
 const AlertsPage = () => {
   const router = useRouter();

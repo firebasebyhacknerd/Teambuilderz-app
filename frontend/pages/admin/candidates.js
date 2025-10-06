@@ -4,8 +4,7 @@ import Button from '../../components/UI/Button';
 import Input from '../../components/UI/Input';
 import { Plus, Search, Filter, Eye, Edit, Trash2, FileText, Calendar, User } from 'lucide-react';
 import { useRouter } from 'next/router';
-
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+import API_URL from '../../lib/api';
 
 const AdminCandidates = () => {
   const router = useRouter();

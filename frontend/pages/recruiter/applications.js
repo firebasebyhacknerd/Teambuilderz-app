@@ -4,8 +4,7 @@ import Button from '../../components/UI/Button';
 import Input from '../../components/UI/Input';
 import { Plus, Search, Filter, Eye, Edit, Calendar, Building, Briefcase, Clock, CheckCircle, XCircle } from 'lucide-react';
 import { useRouter } from 'next/router';
-
-const API_URL = typeof window !== 'undefined' ? 'http://localhost:3001' : 'http://tbz_backend:3001';
+import API_URL from '../../lib/api';
 
 const ApplicationsPage = () => {
   const router = useRouter();

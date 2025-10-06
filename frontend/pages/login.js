@@ -3,8 +3,7 @@ import Card from '../components/UI/Card';
 import Input from '../components/UI/Input';
 import Button from '../components/UI/Button';
 import { LogIn, User, Lock } from 'lucide-react';
-
-const API_URL = process.env.NODE_ENV === 'production' ? 'http://tbz_backend:3001' : 'http://localhost:3001';
+import API_URL from '../lib/api';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('admin@tbz.us');
