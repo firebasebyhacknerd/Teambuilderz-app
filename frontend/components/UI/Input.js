@@ -1,15 +1,18 @@
 import { useState } from 'react';
 
-const Input = ({ label, type = 'text', value, onChange, placeholder = '', icon, required = false, className = '' }) => {
+const Input = ({ label, type = 'text', value, onChange, placeholder = '', icon, required = false, className = '', id }) => {
   const [isFocused, setIsFocused] = useState(false);
 
-  const inputId = 'input-' + label.replace(/\s/g, '-').toLowerCase();
+  const normalizedLabel = label ? label.replace(/\s/g, '-').toLowerCase() : undefined;
+  const inputId = id || (normalizedLabel ? `input-${normalizedLabel}` : undefined);
 
   return (
     <div className={'space-y-1 ' + className}>
-      <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
+      {label && (
+        <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+      )}
       <div className="relative">
         {icon && (
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
