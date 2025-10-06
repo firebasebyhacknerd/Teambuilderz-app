@@ -27,6 +27,11 @@
       "static/chunks/main.js",
       "static/chunks/pages/admin.js"
     ],
+    "/admin/candidates": [
+      "static/chunks/webpack.js",
+      "static/chunks/main.js",
+      "static/chunks/pages/admin/candidates.js"
+    ],
     "/login": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
