@@ -1,10 +1,32 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
+import {
+  Plus,
+  Search,
+  Edit,
+  Trash2,
+  User,
+  Users,
+  Home,
+  FileText,
+  AlertTriangle
+} from 'lucide-react';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import Input from '../../components/UI/Input';
-import { Plus, Search, Filter, Eye, Edit, Trash2, FileText, Calendar, User } from 'lucide-react';
-import { useRouter } from 'next/router';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
+
+const stageBadges = {
+  onboarding: 'bg-blue-100 text-blue-800',
+  marketing: 'bg-yellow-100 text-yellow-800',
+  interviewing: 'bg-purple-100 text-purple-800',
+  offered: 'bg-green-100 text-green-800',
+  placed: 'bg-emerald-100 text-emerald-800',
+  inactive: 'bg-gray-100 text-gray-800'
+};
+
+const stages = Object.keys(stageBadges);
 
 const AdminCandidates = () => {
   const router = useRouter();
@@ -19,7 +41,12 @@ const AdminCandidates = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const stages = ['onboarding', 'marketing', 'interviewing', 'offered', 'placed', 'inactive'];
+  const sidebarLinks = [
+    { href: '/admin', label: 'Dashboard', icon: Home },
+    { href: '/admin/candidates', label: 'Candidates', icon: Users },
+    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+    { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+  ];
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -33,8 +60,8 @@ const AdminCandidates = () => {
       setError('');
 
       const [candidatesRes, recruitersRes] = await Promise.all([
-        fetch(`${API_URL}/api/v1/candidates`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${API_URL}/api/v1/users`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${API_URL}/api/v1/candidates`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/api/v1/users`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
 
       if (candidatesRes.status === 401 || candidatesRes.status === 403) {
@@ -44,9 +71,9 @@ const AdminCandidates = () => {
 
       const candidatesData = await candidatesRes.json();
       const recruitersData = await recruitersRes.json();
-      
+
       setCandidates(candidatesData);
-      setRecruiters(recruitersData.filter(u => u.role === 'Recruiter'));
+      setRecruiters(recruitersData.filter((u) => u.role === 'Recruiter'));
     } catch (fetchError) {
       console.error('Error fetching data:', fetchError);
       setError('Unable to load candidate data. Please try again.');
@@ -59,6 +86,21 @@ const AdminCandidates = () => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const filteredCandidates = useMemo(() => {
+    return candidates
+      .filter((candidate) => {
+        const term = searchTerm.trim().toLowerCase();
+        if (!term) return true;
+        return (
+          candidate.name?.toLowerCase().includes(term) ||
+          candidate.email?.toLowerCase().includes(term) ||
+          candidate.recruiter_name?.toLowerCase().includes(term)
+        );
+      })
+      .filter((candidate) => (stageFilter ? candidate.current_stage === stageFilter : true))
+      .filter((candidate) => (recruiterFilter ? String(candidate.assigned_recruiter_id) === recruiterFilter : true));
+  }, [candidates, searchTerm, stageFilter, recruiterFilter]);
 
   const handleCandidateSave = async (formData) => {
     const token = localStorage.getItem('token');
@@ -85,7 +127,7 @@ const AdminCandidates = () => {
       const response = await fetch(`${API_URL}${endpoint}`, {
         method,
         headers: {
-          'Authorization': `Bearer ${token}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -121,7 +163,7 @@ const AdminCandidates = () => {
       setError('');
       const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}`, {
         method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` }
       });
 
       if (!response.ok) {
@@ -136,90 +178,122 @@ const AdminCandidates = () => {
     }
   };
 
-  const filteredCandidates = candidates.filter(candidate => {
-    const matchesSearch = candidate.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         candidate.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStage = !stageFilter || candidate.current_stage === stageFilter;
-    const matchesRecruiter = !recruiterFilter || candidate.assigned_recruiter_id === parseInt(recruiterFilter);
-    
-    return matchesSearch && matchesStage && matchesRecruiter;
-  });
-
-  const getStageColor = (stage) => {
-    const colors = {
-      onboarding: 'bg-blue-100 text-blue-800',
-      marketing: 'bg-yellow-100 text-yellow-800',
-      interviewing: 'bg-purple-100 text-purple-800',
-      offered: 'bg-green-100 text-green-800',
-      placed: 'bg-emerald-100 text-emerald-800',
-      inactive: 'bg-gray-100 text-gray-800'
-    };
-    return colors[stage] || 'bg-gray-100 text-gray-800';
+  const resetFilters = () => {
+    setSearchTerm('');
+    setStageFilter('');
+    setRecruiterFilter('');
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading candidates...</div>;
+  if (loading) {
+    return (
+      <DashboardLayout
+        title="Candidate Management"
+        subtitle="Add, edit, and assign candidates to recruiters"
+        links={sidebarLinks}
+        onBack={() => router.push('/admin')}
+      >
+        <div className="h-48 flex items-center justify-center text-gray-500">Loading candidates…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Candidate Management</h1>
-        <p className="text-gray-600 mt-2">Manage all candidates and their lifecycle stages</p>
-      </div>
-
+    <DashboardLayout
+      title="Candidate Management"
+      subtitle="Add, edit, and assign candidates to recruiters"
+      links={sidebarLinks}
+      onBack={() => router.push('/admin')}
+      actions={
+        <button
+          type="button"
+          onClick={() => {
+            setError('');
+            setEditingCandidate(null);
+            setShowCreateModal(true);
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+        >
+          <Plus size={18} />
+          Add Candidate
+        </button>
+      }
+    >
       {error && !(showCreateModal || editingCandidate) && (
-        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
-          {error}
-        </div>
+        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
       )}
 
-      {/* Filters and Search */}
       <Card className="p-6 mb-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-1">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="lg:col-span-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
               <Input
-                placeholder="Search candidates by name or email..."
+                placeholder="Search candidates by name, email, or recruiter..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
               />
             </div>
           </div>
-          <select
-            value={stageFilter}
-            onChange={(e) => setStageFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="">All Stages</option>
-            {stages.map(stage => (
-              <option key={stage} value={stage}>{stage.charAt(0).toUpperCase() + stage.slice(1)}</option>
-            ))}
-          </select>
-          <select
-            value={recruiterFilter}
-            onChange={(e) => setRecruiterFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="">All Recruiters</option>
-            {recruiters.map(recruiter => (
-              <option key={recruiter.id} value={recruiter.id}>{recruiter.name}</option>
-            ))}
-          </select>
-          <Button
-            onClick={() => {
-              setError('');
-              setShowCreateModal(true);
-            }}
-            className="flex items-center gap-2"
-          >
-            <Plus size={20} />
-            Add Candidate
-          </Button>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Stage</label>
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All Stages</option>
+              {stages.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recruiter</label>
+            <select
+              value={recruiterFilter}
+              onChange={(e) => setRecruiterFilter(e.target.value)}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All Recruiters</option>
+              {recruiters.map((recruiter) => (
+                <option key={recruiter.id} value={recruiter.id}>
+                  {recruiter.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition"
+            >
+              Reset Filters
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {stages.map((stage) => (
+            <button
+              key={stage}
+              type="button"
+              onClick={() => setStageFilter(stageFilter === stage ? '' : stage)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                stageFilter === stage
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'border-gray-200 text-gray-600 hover:border-blue-300'
+              }`}
+            >
+              {stage}
+            </button>
+          ))}
         </div>
       </Card>
 
-      {/* Candidates Table */}
       <Card className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -235,7 +309,11 @@ const AdminCandidates = () => {
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredCandidates.map((candidate) => (
-                <tr key={candidate.id} className="hover:bg-gray-50">
+                <tr
+                  key={candidate.id}
+                  className="hover:bg-gray-50 transition cursor-pointer"
+                  onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
+                >
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-10 w-10">
@@ -250,7 +328,7 @@ const AdminCandidates = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStageColor(candidate.current_stage)}`}>
+                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${stageBadges[candidate.current_stage] || stageBadges.onboarding}`}>
                       {candidate.current_stage}
                     </span>
                   </td>
@@ -264,13 +342,13 @@ const AdminCandidates = () => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <div className="flex flex-wrap gap-1">
-                      {candidate.skills?.slice(0, 3).map((skill, index) => (
+                    <div className="flex flex-wrap gap-2">
+                      {(candidate.skills || []).slice(0, 3).map((skill, index) => (
                         <span key={index} className="inline-flex px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
                           {skill}
                         </span>
                       ))}
-                      {candidate.skills?.length > 3 && (
+                      {candidate.skills && candidate.skills.length > 3 && (
                         <span className="inline-flex px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
                           +{candidate.skills.length - 3} more
                         </span>
@@ -280,23 +358,34 @@ const AdminCandidates = () => {
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <div className="flex space-x-2">
                       <button
-                        onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
+                        type="button"
                         className="text-blue-600 hover:text-blue-900"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(`/recruiter/candidate/${candidate.id}`);
+                        }}
                       >
-                        <Eye size={16} />
+                        View
                       </button>
                       <button
-                        onClick={() => {
+                        type="button"
+                        className="text-green-600 hover:text-green-900"
+                        onClick={(event) => {
+                          event.stopPropagation();
                           setError('');
                           setEditingCandidate(candidate);
+                          setShowCreateModal(true);
                         }}
-                        className="text-green-600 hover:text-green-900"
                       >
                         <Edit size={16} />
                       </button>
                       <button
-                        onClick={() => handleDeleteCandidate(candidate.id)}
+                        type="button"
                         className="text-red-600 hover:text-red-900"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDeleteCandidate(candidate.id);
+                        }}
                       >
                         <Trash2 size={16} />
                       </button>
@@ -311,13 +400,12 @@ const AdminCandidates = () => {
           <div className="text-center py-12">
             <User size={48} className="mx-auto text-gray-400 mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No candidates found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters</p>
+            <p className="text-gray-500">Try adjusting your search or filters.</p>
           </div>
         )}
       </Card>
 
-      {/* Create/Edit Modal */}
-      {(showCreateModal || editingCandidate) && (
+      {showCreateModal && (
         <CandidateModal
           candidate={editingCandidate}
           recruiters={recruiters}
@@ -331,7 +419,7 @@ const AdminCandidates = () => {
           onSave={handleCandidateSave}
         />
       )}
-    </div>
+    </DashboardLayout>
   );
 };
 
@@ -366,22 +454,21 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
+        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-gray-900">
             {candidate ? 'Edit Candidate' : 'Add New Candidate'}
           </h2>
+          <button className="text-gray-500 hover:text-gray-700" onClick={onClose}>
+            Close
+          </button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <Input
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
-              />
+              <Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -394,17 +481,11 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <Input
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              />
+              <Input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Visa Status</label>
-              <Input
-                value={formData.visa_status}
-                onChange={(e) => setFormData({ ...formData, visa_status: e.target.value })}
-              />
+              <Input value={formData.visa_status} onChange={(e) => setFormData({ ...formData, visa_status: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Experience (Years)</label>
@@ -421,12 +502,11 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
                 onChange={(e) => setFormData({ ...formData, current_stage: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <option value="onboarding">Onboarding</option>
-                <option value="marketing">Marketing</option>
-                <option value="interviewing">Interviewing</option>
-                <option value="offered">Offered</option>
-                <option value="placed">Placed</option>
-                <option value="inactive">Inactive</option>
+                {stages.map((stage) => (
+                  <option key={stage} value={stage}>
+                    {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                  </option>
+                ))}
               </select>
             </div>
             <div>
@@ -437,8 +517,10 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="">Select Recruiter</option>
-                {recruiters.map(recruiter => (
-                  <option key={recruiter.id} value={recruiter.id}>{recruiter.name}</option>
+                {recruiters.map((recruiter) => (
+                  <option key={recruiter.id} value={recruiter.id}>
+                    {recruiter.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -460,16 +542,18 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
             />
           </div>
           {error && (
-            <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
-              {error}
-            </div>
+            <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
           )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition"
+            >
               Cancel
-            </Button>
+            </button>
             <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Saving...' : candidate ? 'Update Candidate' : 'Create Candidate'}
+              {isSaving ? 'Saving…' : candidate ? 'Update Candidate' : 'Create Candidate'}
             </Button>
           </div>
         </form>

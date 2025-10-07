@@ -1,9 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import Card from '../../components/UI/Card';
-import Button from '../../components/UI/Button';
-import { Users, Briefcase, ChevronRight, BarChart3, Target, UserPlus, FileText, Calendar, AlertTriangle, Settings, Plus, LogOut } from 'lucide-react';
 import { useRouter } from 'next/router';
+import {
+  Users,
+  Briefcase,
+  ChevronRight,
+  BarChart3,
+  Target,
+  UserPlus,
+  FileText,
+  Calendar,
+  AlertTriangle,
+  Home,
+  LogOut
+} from 'lucide-react';
+import Card from '../../components/UI/Card';
 import API_URL from '../../lib/api';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
 
 const AdminDashboard = () => {
   const router = useRouter();
@@ -62,20 +74,52 @@ const AdminDashboard = () => {
   const totalCandidates = candidates.length;
   const totalRecruiters = performance.length;
   const totalApplications = performance.reduce((sum, r) => sum + parseInt(r.apps_total_period || 0), 0);
-  const totalAppsToday = performance.reduce((sum, r) => sum + parseInt(r.avg_apps_per_day || 0), 0);
   const openAlerts = alerts.filter(a => a.status === 'open').length;
 
   // Calculate weekly and monthly averages for all recruiters
   const weeklyAvg = weeklyPerformance.length > 0 ? Math.round(weeklyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / weeklyPerformance.length) : 0;
   const monthlyAvg = monthlyPerformance.length > 0 ? Math.round(monthlyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / monthlyPerformance.length) : 0;
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userName');
+    router.push('/login');
+  };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading Admin Dashboard...</div>;
+  const sidebarLinks = [
+    { href: '/admin', label: 'Dashboard', icon: Home },
+    { href: '/admin/candidates', label: 'Candidates', icon: Users },
+    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+    { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+  ];
+
+  if (loading) {
+    return (
+      <DashboardLayout title="Admin Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
+        <div className="h-48 flex items-center justify-center">
+          <p className="text-gray-500">Loading dashboard…</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
-      <Header title="Admin Dashboard" userName={userName} />
-
+    <DashboardLayout
+      title="Admin Dashboard"
+      subtitle={`Welcome back, ${userName}`}
+      links={sidebarLinks}
+      actions={
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100"
+        >
+          <LogOut size={16} />
+          Logout
+        </button>
+      }
+    >
       <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-10">
         <KpiCard icon={<Users />} title="Total Candidates" value={totalCandidates} color="bg-blue-500" />
         <KpiCard icon={<Briefcase />} title="Total Recruiters" value={totalRecruiters} color="bg-green-500" />
@@ -126,36 +170,7 @@ const AdminDashboard = () => {
           ))}
         </div>
       </Card>
-    </div>
-  );
-};
-
-const Header = ({ title, userName }) => {
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('userRole');
-    localStorage.removeItem('userName');
-    window.location.href = '/login';
-  };
-
-  return (
-    <div className="mb-8 pt-4">
-      <div className="flex justify-between items-start">
-        <div>
-          <p className="text-sm font-medium text-gray-500">Welcome back,</p>
-          <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">{userName}</h1>
-          <p className="mt-1 text-xl text-gray-600">{title}</p>
-        </div>
-        <Button 
-          onClick={handleLogout}
-          variant="outline"
-          className="flex items-center gap-2"
-        >
-          <LogOut size={16} />
-          Logout
-        </Button>
-      </div>
-    </div>
+    </DashboardLayout>
   );
 };
 

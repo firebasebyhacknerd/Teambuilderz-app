@@ -1,44 +1,22 @@
-import { useState } from 'react';
+"use client";
 
-const Input = ({ label, type = 'text', value, onChange, placeholder = '', icon, required = false, className = '', id }) => {
-  const [isFocused, setIsFocused] = useState(false);
+import * as React from "react";
 
-  const normalizedLabel = label ? label.replace(/\s/g, '-').toLowerCase() : undefined;
-  const inputId = id || (normalizedLabel ? `input-${normalizedLabel}` : undefined);
+import { cn } from "../../lib/utils";
 
+const Input = React.forwardRef(({ className, type = "text", ...props }, ref) => {
   return (
-    <div className={'space-y-1 ' + className}>
-      {label && (
-        <label htmlFor={inputId} className="block text-sm font-medium text-gray-700">
-          {label} {required && <span className="text-red-500">*</span>}
-        </label>
+    <input
+      type={type}
+      className={cn(
+        "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+        className
       )}
-      <div className="relative">
-        {icon && (
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            {icon}
-          </div>
-        )}
-        <input
-          id={inputId}
-          type={type}
-          value={value}
-          onChange={onChange}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
-          required={required}
-          placeholder={placeholder}
-          className={
-            'block w-full ' +
-            (icon ? 'pl-10 ' : 'pl-4 ') +
-            'pr-4 py-3 border border-gray-300 rounded-xl shadow-inner-sm ' +
-            'placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ' +
-            'bg-white/95 transition duration-150 ease-in-out text-gray-800'
-          }
-        />
-      </div>
-    </div>
+      ref={ref}
+      {...props}
+    />
   );
-};
+});
+Input.displayName = "Input";
 
-export default Input;
+export { Input };
