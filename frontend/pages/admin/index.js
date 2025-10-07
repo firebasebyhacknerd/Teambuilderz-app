@@ -26,7 +26,7 @@ const AdminDashboard = () => {
   const [monthlyPerformance, setMonthlyPerformance] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const userName = typeof window !== 'undefined' ? localStorage.getItem('userName') : 'Admin';
+  const [userName, setUserName] = useState('Admin');
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -62,13 +62,23 @@ const AdminDashboard = () => {
     const monthFrom = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
     const monthTo = today.toISOString().split('T')[0];
 
+    const loadUserName = () => {
+      const storedName = localStorage.getItem('userName');
+      if (storedName) {
+        setUserName(storedName);
+      }
+    };
+
     Promise.all([
       fetchData('/api/v1/candidates', setCandidates),
       fetchData('/api/v1/reports/performance', setPerformance),
       fetchData(`/api/v1/reports/performance?date_from=${weekFrom}&date_to=${weekTo}`, setWeeklyPerformance),
       fetchData(`/api/v1/reports/performance?date_from=${monthFrom}&date_to=${monthTo}`, setMonthlyPerformance),
       fetchData('/api/v1/alerts', setAlerts)
-    ]).finally(() => setLoading(false));
+    ])
+      .finally(() => setLoading(false));
+
+    loadUserName();
 
   }, [router]);
 
