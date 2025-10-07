@@ -1,1 +1,9 @@
-{"/_app":"pages/_app.js","/_error":"pages/_error.js","/admin/candidates":"pages/admin/candidates.html","/admin":"pages/admin.html","/alerts":"pages/alerts.html","/login":"pages/login.html","/recruiter/applications":"pages/recruiter/applications.html","/recruiter/candidate/[id]":"pages/recruiter/candidate/[id].html","/recruiter":"pages/recruiter.html","/_document":"pages/_document.js","/404":"pages/404.html"}
+{
+  "/_app": "pages/_app.js",
+  "/_error": "pages/_error.js",
+  "/_document": "pages/_document.js",
+  "/login": "pages/login.js",
+  "/admin": "pages/admin.js",
+  "/admin/candidates": "pages/admin/candidates.js",
+  "/recruiter": "pages/recruiter.js"
+}
