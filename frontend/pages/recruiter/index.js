@@ -14,7 +14,7 @@ const RecruiterDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [weeklyAvg, setWeeklyAvg] = useState(0);
   const [monthlyAvg, setMonthlyAvg] = useState(0);
-  const userName = typeof window !== 'undefined' ? localStorage.getItem('userName') || 'Recruiter' : 'Recruiter';
+  const [userName, setUserName] = useState('Recruiter');
 
   const totalAppsToday = useMemo(
     () => candidates.reduce((sum, c) => sum + parseInt(c.daily_applications || 0, 10), 0),
@@ -28,6 +28,9 @@ const RecruiterDashboard = () => {
       router.push('/login');
       return;
     }
+
+    const storedName = localStorage.getItem('userName');
+    if (storedName) setUserName(storedName);
 
     const fetchCandidates = async () => {
       try {
@@ -63,9 +66,8 @@ const RecruiterDashboard = () => {
         ]);
 
         const [weekData, monthData] = await Promise.all([weekRes.json(), monthRes.json()]);
-        const recruiterName = localStorage.getItem('userName');
-        const weekRec = weekData.find((r) => r.recruiter_name === recruiterName);
-        const monthRec = monthData.find((r) => r.recruiter_name === recruiterName);
+        const weekRec = weekData.find((r) => r.recruiter_name === (storedName || ''));
+        const monthRec = monthData.find((r) => r.recruiter_name === (storedName || ''));
         setWeeklyAvg(weekRec ? Math.round(weekRec.avg_apps_per_day || 0) : 0);
         setMonthlyAvg(monthRec ? Math.round(monthRec.avg_apps_per_day || 0) : 0);
       } catch (error) {
