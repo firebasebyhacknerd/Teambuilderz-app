@@ -1,10 +1,52 @@
-import React, { useEffect, useState } from 'react';
-import Card from '../../components/UI/Card';
-import Button from '../../components/UI/Button';
-import Input from '../../components/UI/Input';
-import { Plus, Search, Filter, Eye, Edit, Calendar, Building, Briefcase, Clock, CheckCircle, XCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import {
+  Plus,
+  Search,
+  Building,
+  Briefcase,
+  Clock,
+  CheckCircle,
+  XCircle,
+  Home,
+  FileText,
+  AlertTriangle
+} from 'lucide-react';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose
+} from '../../components/ui/dialog';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
+
+const statusMeta = {
+  sent: { variant: 'outline', label: 'Sent' },
+  viewed: { variant: 'outline', label: 'Viewed' },
+  shortlisted: { variant: 'outline', label: 'Shortlisted' },
+  interviewing: { variant: 'outline', label: 'Interviewing' },
+  offered: { variant: 'outline', label: 'Offered' },
+  hired: { variant: 'outline', label: 'Hired' },
+  rejected: { variant: 'destructive', label: 'Rejected' }
+};
+
+const sidebarLinks = [
+  { href: '/recruiter', label: 'Dashboard', icon: Home },
+  { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+  { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+];
+
+const statusOrder = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 
 const ApplicationsPage = () => {
   const router = useRouter();
@@ -14,11 +56,9 @@ const ApplicationsPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const statuses = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -59,7 +99,35 @@ const ApplicationsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSaveApplication = async (formData) => {
+  const filteredApplications = useMemo(() => {
+    return applications
+      .filter((application) => {
+        const term = searchTerm.trim().toLowerCase();
+        if (!term) return true;
+        return (
+          application.candidate_name?.toLowerCase().includes(term) ||
+          application.company_name?.toLowerCase().includes(term) ||
+          application.job_title?.toLowerCase().includes(term)
+        );
+      })
+      .filter((application) => (statusFilter ? application.status === statusFilter : true))
+      .filter((application) => (dateFilter ? application.application_date === dateFilter : true))
+      .sort(
+        (a, b) =>
+          statusOrder.indexOf(a.status ?? 'sent') - statusOrder.indexOf(b.status ?? 'sent')
+      );
+  }, [applications, searchTerm, statusFilter, dateFilter]);
+
+  const summary = useMemo(() => {
+    return {
+      total: applications.length,
+      interviewing: applications.filter((a) => a.status === 'interviewing').length,
+      offers: applications.filter((a) => a.status === 'offered').length,
+      hires: applications.filter((a) => a.status === 'hired').length
+    };
+  }, [applications]);
+
+  const handleSaveApplication = async (formData, resetForm) => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
@@ -89,8 +157,9 @@ const ApplicationsPage = () => {
         throw new Error(data.message || 'Failed to create application.');
       }
 
+      resetForm();
+      setDialogOpen(false);
       await fetchData();
-      setShowCreateModal(false);
     } catch (saveError) {
       console.error('Error saving application:', saveError);
       setError(saveError.message);
@@ -99,251 +168,221 @@ const ApplicationsPage = () => {
     }
   };
 
-  const filteredApplications = applications.filter(application => {
-    const matchesSearch = application.candidate_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         application.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         application.job_title?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = !statusFilter || application.status === statusFilter;
-    const matchesDate = !dateFilter || application.application_date === dateFilter;
-    
-    return matchesSearch && matchesStatus && matchesDate;
-  });
+  const actions = (
+    <DialogTrigger asChild>
+      <Button
+        size="sm"
+        className="gap-2"
+        onClick={() => {
+          setError('');
+        }}
+      >
+        <Plus size={16} />
+        Log Application
+      </Button>
+    </DialogTrigger>
+  );
 
-  const getStatusColor = (status) => {
-    const colors = {
-      sent: 'bg-blue-100 text-blue-800',
-      viewed: 'bg-yellow-100 text-yellow-800',
-      shortlisted: 'bg-purple-100 text-purple-800',
-      interviewing: 'bg-indigo-100 text-indigo-800',
-      offered: 'bg-green-100 text-green-800',
-      hired: 'bg-emerald-100 text-emerald-800',
-      rejected: 'bg-red-100 text-red-800'
-    };
-    return colors[status] || 'bg-gray-100 text-gray-800';
-  };
-
-  const getStatusIcon = (status) => {
-    const icons = {
-      sent: <Clock size={16} />,
-      viewed: <Eye size={16} />,
-      shortlisted: <Filter size={16} />,
-      interviewing: <Calendar size={16} />,
-      offered: <Briefcase size={16} />,
-      hired: <CheckCircle size={16} />,
-      rejected: <XCircle size={16} />
-    };
-    return icons[status] || <Clock size={16} />;
-  };
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading applications...</div>;
+  if (loading) {
+    return (
+      <DashboardLayout title="Applications" subtitle="Manage candidates in the market" links={sidebarLinks}>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading applications…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Application Management</h1>
-        <p className="text-gray-600 mt-2">Track and manage all job applications</p>
-      </div>
+    <Dialog
+      open={dialogOpen}
+      onOpenChange={(open) => {
+        setDialogOpen(open);
+        if (!open) {
+          setError('');
+          setSaving(false);
+        }
+      }}
+    >
+      <DashboardLayout
+        title="Applications"
+        subtitle="Track progress of every candidate outreach"
+        links={sidebarLinks}
+        actions={actions}
+      >
+        {error && !dialogOpen && (
+          <div className="mb-4 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
+        )}
 
-      {error && !showCreateModal && (
-        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
-          {error}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <SummaryCard icon={<Briefcase size={22} />} title="Total Applications" value={summary.total} />
+          <SummaryCard icon={<Clock size={22} />} title="Interviewing" value={summary.interviewing} tone="bg-blue-100 text-blue-700" />
+          <SummaryCard icon={<CheckCircle size={22} />} title="Offers" value={summary.offers} tone="bg-green-100 text-green-700" />
+          <SummaryCard icon={<XCircle size={22} />} title="Hires" value={summary.hires} tone="bg-purple-100 text-purple-700" />
         </div>
-      )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-blue-100 text-blue-600">
-              <Briefcase size={24} />
+        <Card className="p-6 mb-6 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-2">
+              <Label htmlFor="search" className="text-xs text-muted-foreground uppercase tracking-wide">
+                Search
+              </Label>
+              <div className="mt-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="search"
+                  placeholder="Search by candidate, company, or job title..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Applications</p>
-              <p className="text-2xl font-bold text-gray-900">{applications.length}</p>
+            <div>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Status</Label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+              >
+                <option value="">All</option>
+                {statusOrder.map((status) => (
+                  <option key={status} value={status}>
+                    {statusMeta[status]?.label ?? status}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-green-100 text-green-600">
-              <CheckCircle size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Hired</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {applications.filter(a => a.status === 'hired').length}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-yellow-100 text-yellow-600">
-              <Clock size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">In Progress</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {applications.filter(a => ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered'].includes(a.status)).length}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-red-100 text-red-600">
-              <XCircle size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Rejected</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {applications.filter(a => a.status === 'rejected').length}
-              </p>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* Filters and Search */}
-      <Card className="p-6 mb-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+            <div>
+              <Label htmlFor="dateFilter" className="text-xs text-muted-foreground uppercase tracking-wide">
+                Application Date
+              </Label>
               <Input
-                placeholder="Search by candidate, company, or job title..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                id="dateFilter"
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="mt-1"
               />
             </div>
+            <div className="flex items-end">
+              <Button variant="ghost" onClick={() => {
+                setSearchTerm('');
+                setStatusFilter('');
+                setDateFilter('');
+              }}>
+                Reset Filters
+              </Button>
+            </div>
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="">All Statuses</option>
-            {statuses.map(status => (
-              <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {statusOrder.map((status) => (
+              <Badge
+                key={status}
+                variant={statusFilter === status ? 'default' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => setStatusFilter(statusFilter === status ? '' : status)}
+              >
+                {statusMeta[status]?.label ?? status}
+              </Badge>
             ))}
-          </select>
-          <Input
-            type="date"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            placeholder="Filter by date"
-          />
-          <Button
-            onClick={() => {
-              setError('');
-              setShowCreateModal(true);
-            }}
-            className="flex items-center gap-2"
-          >
-            <Plus size={20} />
-            Log Application
-          </Button>
-        </div>
-      </Card>
-
-      {/* Applications Table */}
-      <Card className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Candidate</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company & Role</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Channel</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredApplications.map((application) => (
-                <tr key={application.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <span className="text-sm font-medium text-blue-600">
-                            {application.candidate_name?.charAt(0)}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{application.candidate_name}</div>
-                        <div className="text-sm text-gray-500">ID: {application.candidate_id}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <Building size={16} className="text-gray-400 mr-2" />
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">{application.company_name}</div>
-                        <div className="text-sm text-gray-500">{application.job_title}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(application.status)}`}>
-                        {getStatusIcon(application.status)}
-                        <span className="ml-1">{application.status}</span>
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {application.channel || 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {new Date(application.application_date).toLocaleDateString()}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex space-x-2">
-                      <button className="text-blue-600 hover:text-blue-900">
-                        <Eye size={16} />
-                      </button>
-                      <button className="text-green-600 hover:text-green-900">
-                        <Edit size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filteredApplications.length === 0 && (
-          <div className="text-center py-12">
-            <Briefcase size={48} className="mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No applications found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters</p>
           </div>
-        )}
-      </Card>
+        </Card>
 
-      {/* Create Application Modal */}
-      {showCreateModal && (
-        <ApplicationModal
-          candidates={candidates}
-          error={error}
-          isSaving={saving}
-          onClose={() => {
-            setShowCreateModal(false);
-            setError('');
-          }}
-          onSave={handleSaveApplication}
-        />
-      )}
-    </div>
+        <Card className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-muted/50 border-b">
+                <tr className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  <th className="px-6 py-3">Candidate</th>
+                  <th className="px-6 py-3">Company & Role</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3">Applied On</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredApplications.map((application) => (
+                  <tr key={application.id} className="hover:bg-muted/30 transition">
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-foreground">{application.candidate_name}</span>
+                        <span className="text-xs text-muted-foreground">Recruiter: {application.recruiter_name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col space-y-1">
+                        <span className="text-sm font-medium text-foreground">{application.job_title}</span>
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Building className="h-3 w-3" />
+                          {application.company_name}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge variant={statusMeta[application.status]?.variant ?? 'outline'}>
+                        {statusMeta[application.status]?.label ?? application.status}
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-muted-foreground">
+                        {application.application_date
+                          ? new Date(application.application_date).toLocaleDateString()
+                          : '—'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => router.push(`/recruiter/candidate/${application.candidate_id}`)}
+                        >
+                          <Briefcase className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon">
+                          <Clock className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredApplications.length === 0 && (
+            <div className="py-12 text-center space-y-2">
+              <Briefcase size={48} className="mx-auto text-muted-foreground" />
+              <h3 className="text-lg font-medium text-foreground">No applications match your filters</h3>
+              <p className="text-sm text-muted-foreground">Adjust your search criteria to see more results.</p>
+            </div>
+          )}
+        </Card>
+      </DashboardLayout>
+
+      <ApplicationDialog
+        candidates={candidates}
+        open={dialogOpen}
+        error={error}
+        isSaving={saving}
+        onSubmit={handleSaveApplication}
+      />
+    </Dialog>
   );
 };
 
-const ApplicationModal = ({ candidates, onClose, onSave, isSaving, error }) => {
+const SummaryCard = ({ icon, title, value, tone }) => (
+  <Card className="p-6 flex items-center gap-3">
+    <div className={`h-11 w-11 rounded-full flex items-center justify-center ${tone ?? 'bg-primary/10 text-primary'}`}>
+      {icon}
+    </div>
+    <div>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+      <p className="text-xl font-semibold text-foreground">{value}</p>
+    </div>
+  </Card>
+);
+
+const ApplicationDialog = ({ candidates, open, error, isSaving, onSubmit }) => {
   const [formData, setFormData] = useState({
     candidate_id: '',
     company_name: '',
@@ -352,83 +391,113 @@ const ApplicationModal = ({ candidates, onClose, onSave, isSaving, error }) => {
     channel: ''
   });
 
+  useEffect(() => {
+    if (!open) {
+      setFormData({
+        candidate_id: '',
+        company_name: '',
+        job_title: '',
+        job_description: '',
+        channel: ''
+      });
+    }
+  }, [open]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(formData);
+    onSubmit(formData, () =>
+      setFormData({
+        candidate_id: '',
+        company_name: '',
+        job_title: '',
+        job_description: '',
+        channel: ''
+      })
+    );
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Log New Application</h2>
-        </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Candidate</label>
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>Log New Application</DialogTitle>
+        <DialogDescription>Capture a new outreach or application submission.</DialogDescription>
+      </DialogHeader>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="md:col-span-2 space-y-1">
+            <Label htmlFor="candidate">Candidate</Label>
             <select
+              id="candidate"
               value={formData.candidate_id}
-              onChange={(e) => setFormData({...formData, candidate_id: e.target.value})}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              onChange={(e) => setFormData({ ...formData, candidate_id: e.target.value })}
+              className="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
               required
             >
               <option value="">Select Candidate</option>
-              {candidates.map(candidate => (
-                <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+              {candidates.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
-              <Input
-                value={formData.company_name}
-                onChange={(e) => setFormData({...formData, company_name: e.target.value})}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Job Title</label>
-              <Input
-                value={formData.job_title}
-                onChange={(e) => setFormData({...formData, job_title: e.target.value})}
-                required
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Job Description</label>
-            <textarea
-              value={formData.job_description}
-              onChange={(e) => setFormData({...formData, job_description: e.target.value})}
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Channel</label>
+          <div className="space-y-1">
+            <Label htmlFor="company_name">Company Name</Label>
             <Input
-              placeholder="e.g., LinkedIn, Indeed, Company Website"
-              value={formData.channel}
-              onChange={(e) => setFormData({...formData, channel: e.target.value})}
+              id="company_name"
+              value={formData.company_name}
+              onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+              required
             />
           </div>
-          {error && (
-            <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
-              {error}
-            </div>
-          )}
-          <div className="flex justify-end space-x-3 pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>
+          <div className="space-y-1">
+            <Label htmlFor="job_title">Job Title</Label>
+            <Input
+              id="job_title"
+              value={formData.job_title}
+              onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
+              required
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor="job_description">Job Description</Label>
+          <textarea
+            id="job_description"
+            value={formData.job_description}
+            onChange={(e) => setFormData({ ...formData, job_description: e.target.value })}
+            rows={4}
+            className="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor="channel">Channel</Label>
+          <Input
+            id="channel"
+            placeholder="e.g., LinkedIn, Indeed, Company Website"
+            value={formData.channel}
+            onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
+          />
+        </div>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
+        )}
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
               Cancel
             </Button>
-            <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Saving...' : 'Log Application'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+          </DialogClose>
+          <Button type="submit" disabled={isSaving}>
+            {isSaving ? 'Saving…' : 'Log Application'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 };
 

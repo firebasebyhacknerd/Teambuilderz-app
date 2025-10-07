@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import Card from '../components/UI/Card';
-import Input from '../components/UI/Input';
-import Button from '../components/UI/Button';
 import { LogIn, User, Lock } from 'lucide-react';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  CardFooter
+} from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
 import API_URL from '../lib/api';
 
 const LoginPage = () => {
@@ -47,53 +55,60 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" 
-         style={{ background: 'linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%)' }}>
-      
-      <Card className="w-full max-w-md p-10">
-        <div className="flex justify-center mb-6">
-            <LogIn className="w-10 h-10 text-blue-600" />
-        </div>
-        <h1 className="text-3xl font-bold text-gray-800 text-center mb-1">
-          Staffing Architect
-        </h1>
-        <p className="text-gray-500 text-center mb-8">Internal Access Portal</p>
-        
-        <form onSubmit={handleLogin} className="space-y-6">
-          
-          <Input 
-            label="Email Address" 
-            type="email" 
-            value={email} 
-            onChange={e => setEmail(e.target.value)} 
-            icon={<User className="w-5 h-5 text-gray-400" />}
-            required
-          />
-          <Input 
-            label="Password" 
-            type="password" 
-            value={password} 
-            onChange={e => setPassword(e.target.value)} 
-            icon={<Lock className="w-5 h-5 text-gray-400" />}
-            required
-          />
-
-          {error && (
-            <div className="text-sm text-red-700 bg-red-100/70 p-3 rounded-xl border border-red-200 text-center shadow-inner-sm">
-              {error}
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-slate-100 to-purple-100 p-4">
+      <Card className="w-full max-w-md shadow-lg backdrop-blur">
+        <CardHeader className="text-center space-y-2">
+          <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+            <LogIn className="w-6 h-6" />
+          </div>
+          <CardTitle className="text-3xl font-semibold text-gray-900">Staffing Architect</CardTitle>
+          <CardDescription>Internal Access Portal</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email Address</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="pl-9"
+                  required
+                />
+              </div>
             </div>
-          )}
-
-          <Button type="submit" disabled={loading}>
-            {loading ? 'Authenticating...' : 'Sign In'}
-          </Button>
-        </form>
-
-        <div className="mt-8 text-center text-sm text-gray-500">
-            <p className="font-semibold">Test Credentials:</p>
-            <p>Admin: admin@tbz.us / admin123</p>
-            <p>Recruiter: sarthi@tbz.us / recruit123</p>
-        </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="pl-9"
+                  required
+                />
+              </div>
+            </div>
+            {error && (
+              <div className="text-sm text-red-700 bg-red-100/80 border border-red-200 rounded-md px-3 py-2 text-center">
+                {error}
+              </div>
+            )}
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? 'Authenticating…' : 'Sign In'}
+            </Button>
+          </form>
+        </CardContent>
+        <CardFooter className="flex flex-col text-xs text-muted-foreground space-y-1 text-center">
+          <span className="font-semibold text-gray-600">Test Credentials:</span>
+          <span>Admin: admin@tbz.us / admin123</span>
+          <span>Recruiter: sarthi@tbz.us / recruit123</span>
+        </CardFooter>
       </Card>
     </div>
   );

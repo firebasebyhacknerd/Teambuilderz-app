@@ -1,19 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Plus,
   Search,
   Edit,
   Trash2,
-  User,
   Users,
   Home,
   FileText,
-  AlertTriangle
+  AlertTriangle,
+  User
 } from 'lucide-react';
-import Card from '../../components/UI/Card';
-import Button from '../../components/UI/Button';
-import Input from '../../components/UI/Input';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose
+} from '../../components/ui/dialog';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
 
@@ -28,6 +41,13 @@ const stageBadges = {
 
 const stages = Object.keys(stageBadges);
 
+const sidebarLinks = [
+  { href: '/admin', label: 'Dashboard', icon: Home },
+  { href: '/admin/candidates', label: 'Candidates', icon: Users },
+  { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+  { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+];
+
 const AdminCandidates = () => {
   const router = useRouter();
   const [candidates, setCandidates] = useState([]);
@@ -36,17 +56,10 @@ const AdminCandidates = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('');
   const [recruiterFilter, setRecruiterFilter] = useState('');
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const sidebarLinks = [
-    { href: '/admin', label: 'Dashboard', icon: Home },
-    { href: '/admin/candidates', label: 'Candidates', icon: Users },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
-  ];
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -76,7 +89,7 @@ const AdminCandidates = () => {
       setRecruiters(recruitersData.filter((u) => u.role === 'Recruiter'));
     } catch (fetchError) {
       console.error('Error fetching data:', fetchError);
-      setError('Unable to load candidate data. Please try again.');
+      setError('Unable to load candidates. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -102,7 +115,17 @@ const AdminCandidates = () => {
       .filter((candidate) => (recruiterFilter ? String(candidate.assigned_recruiter_id) === recruiterFilter : true));
   }, [candidates, searchTerm, stageFilter, recruiterFilter]);
 
-  const handleCandidateSave = async (formData) => {
+  const summary = useMemo(() => {
+    const activeCount = candidates.filter((candidate) => candidate.current_stage !== 'inactive').length;
+    return {
+      total: candidates.length,
+      active: activeCount,
+      inactive: candidates.length - activeCount,
+      recruiters: new Set(candidates.map((candidate) => candidate.recruiter_name).filter(Boolean)).size
+    };
+  }, [candidates]);
+
+  const handleCandidateSave = async (formData, resetForm) => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
@@ -138,9 +161,10 @@ const AdminCandidates = () => {
         throw new Error(data.message || 'Failed to save candidate.');
       }
 
-      await fetchData();
-      setShowCreateModal(false);
+      resetForm();
+      setDialogOpen(false);
       setEditingCandidate(null);
+      await fetchData();
     } catch (saveError) {
       console.error('Error saving candidate:', saveError);
       setError(saveError.message);
@@ -178,330 +202,85 @@ const AdminCandidates = () => {
     }
   };
 
-  const resetFilters = () => {
-    setSearchTerm('');
-    setStageFilter('');
-    setRecruiterFilter('');
-  };
+  const actions = (
+    <DialogTrigger asChild>
+      <Button
+        size="sm"
+        className="gap-2"
+        onClick={() => {
+          setEditingCandidate(null);
+          setError('');
+        }}
+      >
+        <Plus size={16} />
+        Add Candidate
+      </Button>
+    </DialogTrigger>
+  );
 
   if (loading) {
     return (
-      <DashboardLayout
-        title="Candidate Management"
-        subtitle="Add, edit, and assign candidates to recruiters"
-        links={sidebarLinks}
-        onBack={() => router.push('/admin')}
-      >
-        <div className="h-48 flex items-center justify-center text-gray-500">Loading candidates…</div>
+      <DashboardLayout title="Candidate Management" subtitle="Loading assigned candidates" links={sidebarLinks}>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidates…</div>
       </DashboardLayout>
     );
   }
 
   return (
-    <DashboardLayout
-      title="Candidate Management"
-      subtitle="Add, edit, and assign candidates to recruiters"
-      links={sidebarLinks}
-      onBack={() => router.push('/admin')}
-      actions={
-        <button
-          type="button"
-          onClick={() => {
-            setError('');
-            setEditingCandidate(null);
-            setShowCreateModal(true);
-          }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-        >
-          <Plus size={18} />
-          Add Candidate
-        </button>
-      }
+    <Dialog
+      open={dialogOpen}
+      onOpenChange={(open) => {
+        setDialogOpen(open);
+        if (!open) {
+          setEditingCandidate(null);
+          setError('');
+          setSaving(false);
+        }
+      }}
     >
-      {error && !(showCreateModal || editingCandidate) && (
-        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
-      )}
-
-      <Card className="p-6 mb-6">
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
-              <Input
-                placeholder="Search candidates by name, email, or recruiter..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Stage</label>
-            <select
-              value={stageFilter}
-              onChange={(e) => setStageFilter(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">All Stages</option>
-              {stages.map((stage) => (
-                <option key={stage} value={stage}>
-                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Recruiter</label>
-            <select
-              value={recruiterFilter}
-              onChange={(e) => setRecruiterFilter(e.target.value)}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">All Recruiters</option>
-              {recruiters.map((recruiter) => (
-                <option key={recruiter.id} value={recruiter.id}>
-                  {recruiter.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end">
-            <button
-              type="button"
-              onClick={resetFilters}
-              className="w-full px-4 py-2.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition"
-            >
-              Reset Filters
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {stages.map((stage) => (
-            <button
-              key={stage}
-              type="button"
-              onClick={() => setStageFilter(stageFilter === stage ? '' : stage)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
-                stageFilter === stage
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'border-gray-200 text-gray-600 hover:border-blue-300'
-              }`}
-            >
-              {stage}
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      <Card className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Candidate</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stage</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Recruiter</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Applications</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Skills</th>
-                <th className="px-6 py-4 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredCandidates.map((candidate) => (
-                <tr
-                  key={candidate.id}
-                  className="hover:bg-gray-50 transition cursor-pointer"
-                  onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
-                >
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="flex-shrink-0 h-10 w-10">
-                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          <User size={20} className="text-blue-600" />
-                        </div>
-                      </div>
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-gray-900">{candidate.name}</div>
-                        <div className="text-sm text-gray-500">{candidate.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${stageBadges[candidate.current_stage] || stageBadges.onboarding}`}>
-                      {candidate.current_stage}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {candidate.recruiter_name || 'Unassigned'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <div className="flex flex-col">
-                      <span className="font-medium">{candidate.total_applications || 0} total</span>
-                      <span className="text-gray-500">{candidate.daily_applications || 0} today</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    <div className="flex flex-wrap gap-2">
-                      {(candidate.skills || []).slice(0, 3).map((skill, index) => (
-                        <span key={index} className="inline-flex px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
-                          {skill}
-                        </span>
-                      ))}
-                      {candidate.skills && candidate.skills.length > 3 && (
-                        <span className="inline-flex px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded">
-                          +{candidate.skills.length - 3} more
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex space-x-2">
-                      <button
-                        type="button"
-                        className="text-blue-600 hover:text-blue-900"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          router.push(`/recruiter/candidate/${candidate.id}`);
-                        }}
-                      >
-                        View
-                      </button>
-                      <button
-                        type="button"
-                        className="text-green-600 hover:text-green-900"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setError('');
-                          setEditingCandidate(candidate);
-                          setShowCreateModal(true);
-                        }}
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        className="text-red-600 hover:text-red-900"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          handleDeleteCandidate(candidate.id);
-                        }}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {filteredCandidates.length === 0 && (
-          <div className="text-center py-12">
-            <User size={48} className="mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No candidates found</h3>
-            <p className="text-gray-500">Try adjusting your search or filters.</p>
-          </div>
+      <DashboardLayout
+        title="Candidate Management"
+        subtitle="Assign, track, and stage candidates across the pipeline"
+        links={sidebarLinks}
+        onBack={() => router.push('/admin')}
+        actions={actions}
+      >
+        {error && !dialogOpen && (
+          <div className="mb-4 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
         )}
-      </Card>
 
-      {showCreateModal && (
-        <CandidateModal
-          candidate={editingCandidate}
-          recruiters={recruiters}
-          error={error}
-          isSaving={saving}
-          onClose={() => {
-            setShowCreateModal(false);
-            setEditingCandidate(null);
-            setError('');
-          }}
-          onSave={handleCandidateSave}
-        />
-      )}
-    </DashboardLayout>
-  );
-};
-
-const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, error }) => {
-  const [formData, setFormData] = useState({
-    name: candidate?.name || '',
-    email: candidate?.email || '',
-    phone: candidate?.phone || '',
-    visa_status: candidate?.visa_status || '',
-    skills: candidate?.skills || [],
-    experience_years: candidate?.experience_years || '',
-    current_stage: candidate?.current_stage || 'onboarding',
-    assigned_recruiter_id: candidate?.assigned_recruiter_id ? String(candidate.assigned_recruiter_id) : ''
-  });
-
-  useEffect(() => {
-    setFormData({
-      name: candidate?.name || '',
-      email: candidate?.email || '',
-      phone: candidate?.phone || '',
-      visa_status: candidate?.visa_status || '',
-      skills: candidate?.skills || [],
-      experience_years: candidate?.experience_years || '',
-      current_stage: candidate?.current_stage || 'onboarding',
-      assigned_recruiter_id: candidate?.assigned_recruiter_id ? String(candidate.assigned_recruiter_id) : ''
-    });
-  }, [candidate]);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSave(formData);
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-gray-900">
-            {candidate ? 'Edit Candidate' : 'Add New Candidate'}
-          </h2>
-          <button className="text-gray-500 hover:text-gray-700" onClick={onClose}>
-            Close
-          </button>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <SummaryCard icon={<Users className="h-5 w-5 text-blue-600" />} title="Total Candidates" value={summary.total} accent="bg-blue-100 text-blue-700" />
+          <SummaryCard icon={<Users className="h-5 w-5 text-emerald-600" />} title="Active" value={summary.active} accent="bg-emerald-100 text-emerald-700" />
+          <SummaryCard icon={<Users className="h-5 w-5 text-gray-600" />} title="Inactive" value={summary.inactive} accent="bg-gray-100 text-gray-700" />
+          <SummaryCard icon={<Users className="h-5 w-5 text-purple-600" />} title="Recruiters Engaged" value={summary.recruiters} accent="bg-purple-100 text-purple-700" />
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <Input value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} required />
+
+        <Card className="p-6 mb-6 space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-2">
+              <Label htmlFor="search" className="text-xs text-muted-foreground uppercase tracking-wide">
+                Search
+              </Label>
+              <div className="mt-1 relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="search"
+                  placeholder="Search by name, email, or recruiter..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-              <Input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-              <Input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Visa Status</label>
-              <Input value={formData.visa_status} onChange={(e) => setFormData({ ...formData, visa_status: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Experience (Years)</label>
-              <Input
-                type="number"
-                value={formData.experience_years}
-                onChange={(e) => setFormData({ ...formData, experience_years: e.target.value })}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Current Stage</label>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Stage</Label>
               <select
-                value={formData.current_stage}
-                onChange={(e) => setFormData({ ...formData, current_stage: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={stageFilter}
+                onChange={(e) => setStageFilter(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
+                <option value="">All Stages</option>
                 {stages.map((stage) => (
                   <option key={stage} value={stage}>
                     {stage.charAt(0).toUpperCase() + stage.slice(1)}
@@ -510,13 +289,13 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Assigned Recruiter</label>
+              <Label className="text-xs text-muted-foreground uppercase tracking-wide">Recruiter</Label>
               <select
-                value={formData.assigned_recruiter_id}
-                onChange={(e) => setFormData({ ...formData, assigned_recruiter_id: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                value={recruiterFilter}
+                onChange={(e) => setRecruiterFilter(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
-                <option value="">Select Recruiter</option>
+                <option value="">All Recruiters</option>
                 {recruiters.map((recruiter) => (
                   <option key={recruiter.id} value={recruiter.id}>
                     {recruiter.name}
@@ -524,41 +303,327 @@ const CandidateModal = ({ candidate, recruiters, onClose, onSave, isSaving, erro
                 ))}
               </select>
             </div>
+            <div className="flex items-end">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSearchTerm('');
+                  setStageFilter('');
+                  setRecruiterFilter('');
+                }}
+              >
+                Reset
+              </Button>
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Skills (comma-separated)</label>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {stages.map((stage) => (
+              <Badge
+                key={stage}
+                variant={stageFilter === stage ? 'default' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => setStageFilter(stageFilter === stage ? '' : stage)}
+              >
+                {stage.charAt(0).toUpperCase() + stage.slice(1)}
+              </Badge>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-muted/50 border-b">
+                <tr className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  <th className="px-6 py-3">Candidate</th>
+                  <th className="px-6 py-3">Stage</th>
+                  <th className="px-6 py-3">Recruiter</th>
+                  <th className="px-6 py-3">Applications</th>
+                  <th className="px-6 py-3">Skills</th>
+                  <th className="px-6 py-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredCandidates.map((candidate) => (
+                  <tr
+                    key={candidate.id}
+                    className="hover:bg-muted/30 transition cursor-pointer"
+                    onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
+                  >
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                          <User className="h-5 w-5 text-blue-600" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{candidate.name}</p>
+                          <p className="text-xs text-muted-foreground">{candidate.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>
+                        {candidate.current_stage}
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-foreground">{candidate.recruiter_name || 'Unassigned'}</td>
+                    <td className="px-6 py-4 text-sm text-foreground">
+                      <div className="flex flex-col">
+                        <span className="font-medium">{candidate.total_applications || 0} total</span>
+                        <span className="text-xs text-muted-foreground">{candidate.daily_applications || 0} today</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        {(candidate.skills || []).slice(0, 3).map((skill) => (
+                          <Badge key={skill} variant="outline">
+                            {skill}
+                          </Badge>
+                        ))}
+                        {candidate.skills && candidate.skills.length > 3 && (
+                          <span>+{candidate.skills.length - 3} more</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEditingCandidate(candidate);
+                            setDialogOpen(true);
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleDeleteCandidate(candidate.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {filteredCandidates.length === 0 && (
+            <div className="py-12 text-center space-y-2">
+              <Users size={48} className="mx-auto text-muted-foreground" />
+              <h3 className="text-lg font-medium text-foreground">No candidates match your filters</h3>
+              <p className="text-sm text-muted-foreground">Adjust your filters or add a new candidate.</p>
+            </div>
+          )}
+        </Card>
+      </DashboardLayout>
+
+      <CandidateDialog
+        open={dialogOpen}
+        candidate={editingCandidate}
+        recruiters={recruiters}
+        error={error}
+        isSaving={saving}
+        onSubmit={handleCandidateSave}
+      />
+    </Dialog>
+  );
+};
+
+const SummaryCard = ({ icon, title, value, accent }) => (
+  <Card className="p-5 flex items-center gap-3">
+    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent ?? 'bg-muted text-foreground'}`}>
+      {icon}
+    </div>
+    <div>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+      <p className="text-xl font-semibold text-foreground">{value}</p>
+    </div>
+  </Card>
+);
+
+const CandidateDialog = ({ open, candidate, recruiters, error, isSaving, onSubmit }) => {
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    visa_status: '',
+    skills: [],
+    experience_years: '',
+    current_stage: 'onboarding',
+    assigned_recruiter_id: ''
+  });
+
+  useEffect(() => {
+    if (candidate) {
+      setFormData({
+        name: candidate.name || '',
+        email: candidate.email || '',
+        phone: candidate.phone || '',
+        visa_status: candidate.visa_status || '',
+        skills: candidate.skills || [],
+        experience_years: candidate.experience_years || '',
+        current_stage: candidate.current_stage || 'onboarding',
+        assigned_recruiter_id: candidate.assigned_recruiter_id ? String(candidate.assigned_recruiter_id) : ''
+      });
+    } else {
+      setFormData({
+        name: '',
+        email: '',
+        phone: '',
+        visa_status: '',
+        skills: [],
+        experience_years: '',
+        current_stage: 'onboarding',
+        assigned_recruiter_id: ''
+      });
+    }
+  }, [candidate, open]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(
+      formData,
+      () =>
+        setFormData({
+          name: '',
+          email: '',
+          phone: '',
+          visa_status: '',
+          skills: [],
+          experience_years: '',
+          current_stage: 'onboarding',
+          assigned_recruiter_id: ''
+        })
+    );
+  };
+
+  return (
+    <DialogContent className="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle>{candidate ? 'Edit Candidate' : 'Add New Candidate'}</DialogTitle>
+        <DialogDescription>Maintain accurate candidate records and recruiter assignments.</DialogDescription>
+      </DialogHeader>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label htmlFor="name">Name</Label>
             <Input
-              placeholder="React, Node.js, Python..."
-              value={formData.skills.join(', ')}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  skills: e.target.value
-                    .split(',')
-                    .map((skill) => skill.trim())
-                    .filter((skill) => skill.length > 0)
-                })
-              }
+              id="name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
             />
           </div>
-          {error && (
-            <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
-          )}
-          <div className="flex justify-end space-x-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100 transition"
-            >
-              Cancel
-            </button>
-            <Button type="submit" disabled={isSaving}>
-              {isSaving ? 'Saving…' : candidate ? 'Update Candidate' : 'Create Candidate'}
-            </Button>
+          <div className="space-y-1">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+              required
+            />
           </div>
-        </form>
-      </div>
-    </div>
+          <div className="space-y-1">
+            <Label htmlFor="phone">Phone</Label>
+            <Input
+              id="phone"
+              value={formData.phone}
+              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="visa_status">Visa Status</Label>
+            <Input
+              id="visa_status"
+              value={formData.visa_status}
+              onChange={(e) => setFormData({ ...formData, visa_status: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="experience_years">Experience (Years)</Label>
+            <Input
+              id="experience_years"
+              type="number"
+              value={formData.experience_years}
+              onChange={(e) => setFormData({ ...formData, experience_years: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="current_stage">Current Stage</Label>
+            <select
+              id="current_stage"
+              value={formData.current_stage}
+              onChange={(e) => setFormData({ ...formData, current_stage: e.target.value })}
+              className="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              {stages.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label htmlFor="assigned_recruiter_id">Assigned Recruiter</Label>
+            <select
+              id="assigned_recruiter_id"
+              value={formData.assigned_recruiter_id}
+              onChange={(e) => setFormData({ ...formData, assigned_recruiter_id: e.target.value })}
+              className="w-full px-3 py-2 rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <option value="">Select Recruiter</option>
+              {recruiters.map((recruiter) => (
+                <option key={recruiter.id} value={recruiter.id}>
+                  {recruiter.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="skills">Skills (comma separated)</Label>
+          <Input
+            id="skills"
+            placeholder="React, Node.js, Python..."
+            value={formData.skills.join(', ')}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                skills: e.target.value
+                  .split(',')
+                  .map((skill) => skill.trim())
+                  .filter((skill) => skill.length > 0)
+              })
+            }
+          />
+        </div>
+
+        {error && (
+          <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
+        )}
+
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button type="button" variant="outline">
+              Cancel
+            </Button>
+          </DialogClose>
+          <Button type="submit" disabled={isSaving}>
+            {isSaving ? 'Saving…' : candidate ? 'Update Candidate' : 'Create Candidate'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
   );
 };
 

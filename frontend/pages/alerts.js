@@ -1,8 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import Card from '../components/UI/Card';
-import Button from '../components/UI/Button';
-import { Bell, AlertTriangle, CheckCircle, Clock, Target, Calendar, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import {
+  Bell,
+  AlertTriangle,
+  CheckCircle,
+  Clock,
+  Target,
+  Calendar,
+  Home,
+  Users,
+  FileText
+} from 'lucide-react';
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import DashboardLayout from '../components/Layout/DashboardLayout';
 import API_URL from '../lib/api';
 
 const AlertsPage = () => {
@@ -12,6 +24,7 @@ const AlertsPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [processingAlertId, setProcessingAlertId] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [userRole, setUserRole] = useState('Admin');
 
   const fetchAlerts = async () => {
     const token = localStorage.getItem('token');
@@ -44,13 +57,34 @@ const AlertsPage = () => {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedRole = localStorage.getItem('userRole');
+      if (storedRole) setUserRole(storedRole);
+    }
     fetchAlerts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filteredAlerts = alerts.filter(alert => 
-    !statusFilter || alert.status === statusFilter
+  const filteredAlerts = useMemo(
+    () => alerts.filter((alert) => (!statusFilter ? true : alert.status === statusFilter)),
+    [alerts, statusFilter]
   );
+
+  const sidebarLinks = useMemo(() => {
+    if (userRole === 'Recruiter') {
+      return [
+        { href: '/recruiter', label: 'Dashboard', icon: Home },
+        { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+        { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+      ];
+    }
+    return [
+      { href: '/admin', label: 'Dashboard', icon: Home },
+      { href: '/admin/candidates', label: 'Candidates', icon: Users },
+      { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+      { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+    ];
+  }, [userRole]);
 
   const getAlertIcon = (alertType) => {
     const icons = {
@@ -64,7 +98,7 @@ const AlertsPage = () => {
 
   const getAlertColor = (alertType, status) => {
     if (status === 'resolved') return 'bg-gray-100 text-gray-600';
-    
+
     const colors = {
       quota_breach: 'bg-red-100 text-red-800',
       assessment_due: 'bg-yellow-100 text-yellow-800',
@@ -105,9 +139,7 @@ const AlertsPage = () => {
       }
 
       const updatedAlert = await response.json();
-      setAlerts((prev) =>
-        prev.map((alert) => (alert.id === updatedAlert.id ? updatedAlert : alert))
-      );
+      setAlerts((prev) => prev.map((alert) => (alert.id === updatedAlert.id ? updatedAlert : alert)));
     } catch (error) {
       console.error(`Error updating alert (${action}):`, error);
       setActionError(error.message);
@@ -120,128 +152,107 @@ const AlertsPage = () => {
 
   const handleResolve = (alertId) => handleAlertAction(alertId, 'resolve');
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading alerts...</div>;
+  if (loading) {
+    return (
+      <DashboardLayout title="Alerts & Notifications" subtitle="Monitoring system events" links={sidebarLinks}>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading alerts…</div>
+      </DashboardLayout>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-gray-50/50 backdrop-blur-sm p-4 md:p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Alerts & Notifications</h1>
-        <p className="text-gray-600 mt-2">Stay updated with important notifications and alerts</p>
-      </div>
-
+    <DashboardLayout
+      title="Alerts & Notifications"
+      subtitle="Stay ahead of quota breaches, assessment deadlines, and interview reminders."
+      links={sidebarLinks}
+    >
       {actionError && (
-        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">
-          {actionError}
-        </div>
+        <div className="mb-6 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{actionError}</div>
       )}
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-red-100 text-red-600">
-              <Bell size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Total Alerts</p>
-              <p className="text-2xl font-bold text-gray-900">{alerts.length}</p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-yellow-100 text-yellow-600">
-              <Clock size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Open</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {alerts.filter(a => a.status === 'open').length}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-blue-100 text-blue-600">
-              <CheckCircle size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Acknowledged</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {alerts.filter(a => a.status === 'acknowledged').length}
-              </p>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-green-100 text-green-600">
-              <CheckCircle size={24} />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-500">Resolved</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {alerts.filter(a => a.status === 'resolved').length}
-              </p>
-            </div>
-          </div>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <SummaryCard icon={<Bell size={24} />} title="Total Alerts" value={alerts.length} color="bg-blue-100 text-blue-600" />
+        <SummaryCard
+          icon={<AlertTriangle size={24} />}
+          title="Open"
+          value={alerts.filter((a) => a.status === 'open').length}
+          color="bg-red-100 text-red-600"
+        />
+        <SummaryCard
+          icon={<Clock size={24} />}
+          title="Acknowledged"
+          value={alerts.filter((a) => a.status === 'acknowledged').length}
+          color="bg-yellow-100 text-yellow-600"
+        />
+        <SummaryCard
+          icon={<CheckCircle size={24} />}
+          title="Resolved"
+          value={alerts.filter((a) => a.status === 'resolved').length}
+          color="bg-green-100 text-green-600"
+        />
       </div>
 
-      {/* Filter */}
       <Card className="p-6 mb-6">
-        <div className="flex items-center space-x-4">
-          <label className="text-sm font-medium text-gray-700">Filter by status:</label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm font-medium text-muted-foreground">Filter by status</label>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="px-4 py-2 border border-border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary/40"
           >
             <option value="">All Statuses</option>
             <option value="open">Open</option>
             <option value="acknowledged">Acknowledged</option>
             <option value="resolved">Resolved</option>
           </select>
+          <Button variant="ghost" onClick={() => setStatusFilter('')}>
+            Reset
+          </Button>
         </div>
       </Card>
 
-      {/* Alerts List */}
       <div className="space-y-4">
         {filteredAlerts.length === 0 ? (
           <Card className="p-12 text-center">
-            <Bell size={48} className="mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No alerts found</h3>
-            <p className="text-gray-500">You're all caught up! No alerts to show.</p>
+            <Bell size={48} className="mx-auto text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-2">No alerts found</h3>
+            <p className="text-muted-foreground">You&apos;re all caught up! No alerts to show.</p>
           </Card>
         ) : (
           filteredAlerts.map((alert) => (
-            <Card key={alert.id} className={`p-6 border-l-4 ${
-              alert.status === 'open' ? 'border-l-red-500' : 
-              alert.status === 'acknowledged' ? 'border-l-yellow-500' : 
-              'border-l-green-500'
-            }`}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-start space-x-4">
+            <Card
+              key={alert.id}
+              className={`p-6 border-l-4 ${
+                alert.status === 'open'
+                  ? 'border-l-red-500'
+                  : alert.status === 'acknowledged'
+                  ? 'border-l-yellow-500'
+                  : 'border-l-green-500'
+              }`}
+            >
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                <div className="flex items-start gap-4">
                   <div className={`p-2 rounded-full ${getAlertColor(alert.alert_type, alert.status)}`}>
                     {getAlertIcon(alert.alert_type)}
                   </div>
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <h3 className="text-lg font-semibold text-gray-900">{alert.title}</h3>
-                      <span className={`text-xs font-medium ${getPriorityColor(alert.priority)}`}>
-                        Priority {alert.priority}
-                      </span>
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        alert.status === 'open' ? 'bg-red-100 text-red-800' :
-                        alert.status === 'acknowledged' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-semibold text-foreground">{alert.title}</h3>
+                      <span className={`text-xs font-medium ${getPriorityColor(alert.priority)}`}>Priority {alert.priority}</span>
+                      <span
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          alert.status === 'open'
+                            ? 'bg-red-100 text-red-800'
+                            : alert.status === 'acknowledged'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-green-100 text-green-800'
+                        }`}
+                      >
                         {alert.status}
                       </span>
                     </div>
-                    <p className="text-gray-600 mb-3">{alert.message}</p>
-                    <div className="flex items-center space-x-4 text-sm text-gray-500">
+                    <p className="text-muted-foreground">{alert.message}</p>
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                       <span>Type: {alert.alert_type.replace('_', ' ')}</span>
                       <span>•</span>
                       <span>Created: {new Date(alert.created_at).toLocaleString()}</span>
@@ -260,28 +271,15 @@ const AlertsPage = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-2">
                   {alert.status === 'open' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={processingAlertId === alert.id}
-                      onClick={() => handleAcknowledge(alert.id)}
-                      className="flex items-center space-x-1"
-                    >
-                      <CheckCircle size={16} />
-                      <span>{processingAlertId === alert.id ? 'Updating...' : 'Acknowledge'}</span>
+                    <Button variant="outline" disabled={processingAlertId === alert.id} onClick={() => handleAcknowledge(alert.id)}>
+                      {processingAlertId === alert.id ? 'Updating…' : 'Acknowledge'}
                     </Button>
                   )}
                   {alert.status === 'acknowledged' && (
-                    <Button
-                      size="sm"
-                      disabled={processingAlertId === alert.id}
-                      onClick={() => handleResolve(alert.id)}
-                      className="flex items-center space-x-1"
-                    >
-                      <CheckCircle size={16} />
-                      <span>{processingAlertId === alert.id ? 'Updating...' : 'Resolve'}</span>
+                    <Button disabled={processingAlertId === alert.id} onClick={() => handleResolve(alert.id)}>
+                      {processingAlertId === alert.id ? 'Updating…' : 'Resolve'}
                     </Button>
                   )}
                 </div>
@@ -290,8 +288,18 @@ const AlertsPage = () => {
           ))
         )}
       </div>
-    </div>
+    </DashboardLayout>
   );
 };
+
+const SummaryCard = ({ icon, title, value, color }) => (
+  <Card className="p-6 flex items-center gap-3">
+    <div className={`w-11 h-11 rounded-full flex items-center justify-center ${color}`}>{icon}</div>
+    <div>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+      <p className="text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  </Card>
+);
 
 export default AlertsPage;

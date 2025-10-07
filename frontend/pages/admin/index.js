@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
@@ -13,7 +14,8 @@ import {
   Home,
   LogOut
 } from 'lucide-react';
-import Card from '../../components/UI/Card';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
 import API_URL from '../../lib/api';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 
@@ -110,54 +112,50 @@ const AdminDashboard = () => {
       subtitle={`Welcome back, ${userName}`}
       links={sidebarLinks}
       actions={
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100"
-        >
-          <LogOut size={16} />
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleLogout}>
+          <LogOut className="h-4 w-4" />
           Logout
-        </button>
+        </Button>
       }
     >
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-6 mb-10">
-        <KpiCard icon={<Users />} title="Total Candidates" value={totalCandidates} color="bg-blue-500" />
-        <KpiCard icon={<Briefcase />} title="Total Recruiters" value={totalRecruiters} color="bg-green-500" />
-        <KpiCard icon={<BarChart3 />} title="Total Applications" value={totalApplications} color="bg-purple-500" />
-        <KpiCard icon={<Target />} title="Weekly Avg Apps/Day" value={weeklyAvg} color="bg-yellow-500" />
-        <KpiCard icon={<Target />} title="Monthly Avg Apps/Day" value={monthlyAvg} color="bg-pink-500" />
-        <KpiCard icon={<AlertTriangle />} title="Open Alerts" value={openAlerts} color="bg-red-500" />
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-8">
+        <KpiCard icon={<Users className="h-5 w-5 text-blue-600" />} title="Total Candidates" value={totalCandidates} accent="bg-blue-100 text-blue-700" />
+        <KpiCard icon={<Briefcase className="h-5 w-5 text-emerald-600" />} title="Total Recruiters" value={totalRecruiters} accent="bg-emerald-100 text-emerald-700" />
+        <KpiCard icon={<BarChart3 className="h-5 w-5 text-purple-600" />} title="Total Applications" value={totalApplications} accent="bg-purple-100 text-purple-700" />
+        <KpiCard icon={<Target className="h-5 w-5 text-yellow-600" />} title="Weekly Avg Apps/Day" value={weeklyAvg} accent="bg-yellow-100 text-yellow-700" />
+        <KpiCard icon={<Target className="h-5 w-5 text-pink-600" />} title="Monthly Avg Apps/Day" value={monthlyAvg} accent="bg-pink-100 text-pink-700" />
+        <KpiCard icon={<AlertTriangle className="h-5 w-5 text-red-600" />} title="Open Alerts" value={openAlerts} accent="bg-red-100 text-red-700" />
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <QuickActionCard
-          icon={<UserPlus />}
+          icon={<UserPlus className="h-5 w-5 text-blue-600" />}
           title="Manage Candidates"
           description="Add, edit, and track candidates"
           onClick={() => router.push('/admin/candidates')}
-          color="bg-blue-500"
+          accent="bg-blue-100 text-blue-700"
         />
         <QuickActionCard
-          icon={<FileText />}
+          icon={<FileText className="h-5 w-5 text-emerald-600" />}
           title="View Applications"
           description="Track all job applications"
           onClick={() => router.push('/recruiter/applications')}
-          color="bg-green-500"
+          accent="bg-emerald-100 text-emerald-700"
         />
         <QuickActionCard
-          icon={<Calendar />}
+          icon={<Calendar className="h-5 w-5 text-purple-600" />}
           title="Schedule Interviews"
           description="Manage interview schedules"
           onClick={() => router.push('/recruiter/interviews')}
-          color="bg-purple-500"
+          accent="bg-purple-100 text-purple-700"
         />
         <QuickActionCard
-          icon={<AlertTriangle />}
+          icon={<AlertTriangle className="h-5 w-5 text-red-600" />}
           title="View Alerts"
           description="Check notifications and alerts"
           onClick={() => router.push('/alerts')}
-          color="bg-red-500"
+          accent="bg-red-100 text-red-700"
         />
       </div>
 
@@ -174,30 +172,28 @@ const AdminDashboard = () => {
   );
 };
 
-const KpiCard = ({ icon, title, value, color }) => (
-    <Card className="flex items-center space-x-4 p-4">
-        <div className={`p-3 rounded-xl text-white ${color}`}>
-            {React.cloneElement(icon, { size: 24 })}
-        </div>
-        <div>
-            <p className="text-sm font-medium text-gray-500">{title}</p>
-            <p className="text-3xl font-bold text-gray-900 mt-1">{value}</p>
-        </div>
-    </Card>
+const KpiCard = ({ icon, title, value, accent }) => (
+  <Card className="flex items-center gap-3 p-5">
+    <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>
+      {icon}
+    </div>
+    <div>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+      <p className="text-2xl font-semibold text-foreground">{value}</p>
+    </div>
+  </Card>
 );
 
-const QuickActionCard = ({ icon, title, description, onClick, color }) => (
-    <Card className="p-6 cursor-pointer hover:shadow-lg transition-shadow duration-200" onClick={onClick}>
-        <div className="flex items-center space-x-4">
-            <div className={`p-3 rounded-xl text-white ${color}`}>
-                {React.cloneElement(icon, { size: 24 })}
-            </div>
-            <div>
-                <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-                <p className="text-sm text-gray-500">{description}</p>
-            </div>
-        </div>
-    </Card>
+const QuickActionCard = ({ icon, title, description, onClick, accent }) => (
+  <Card className="p-5 border-dashed hover:border-primary/40 transition-colors cursor-pointer" onClick={onClick}>
+    <div className="flex items-center gap-3">
+      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
+      <div>
+        <h3 className="text-base font-semibold text-foreground">{title}</h3>
+        <p className="text-sm text-muted-foreground">{description}</p>
+      </div>
+    </div>
+  </Card>
 );
 
 const RecruiterListItem = ({ recruiter }) => {

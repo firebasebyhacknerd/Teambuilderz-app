@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ArrowLeft, Menu, X } from 'lucide-react';
+import { Button } from '../ui/button';
 
 /**
  * DashboardLayout renders a sticky sidebar with quick navigation and
@@ -34,39 +35,35 @@ const DashboardLayout = ({
           key={href}
           href={href}
           onClick={() => setSidebarOpen(false)}
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors duration-150 ${
+          className={`flex items-center gap-3 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
             isActive
-              ? 'bg-blue-600 text-white shadow-lg'
-              : 'text-gray-600 hover:bg-blue-50 hover:text-blue-700'
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
           }`}
         >
           {Icon && <Icon size={18} />}
-          <span className="font-medium">{label}</span>
+          <span>{label}</span>
         </Link>
       );
     });
 
   return (
-    <div className="min-h-screen bg-gray-50/70 flex">
+    <div className="min-h-screen bg-muted/20 flex">
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-72 bg-white border-r border-gray-200 shadow-lg transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-72 bg-background border-r border-border shadow-lg transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div className="h-full flex flex-col overflow-y-auto">
-          <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+          <div className="px-6 py-5 border-b border-border flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wider text-gray-500">TeamBuilderz</p>
-              <h2 className="text-lg font-semibold text-gray-900">Control Center</h2>
+              <p className="text-xs uppercase tracking-wider text-muted-foreground">TeamBuilderz</p>
+              <h2 className="text-lg font-semibold text-foreground">Control Center</h2>
             </div>
-            <button
-              type="button"
-              className="lg:hidden p-2 rounded-lg hover:bg-gray-100 text-gray-600"
-              onClick={() => setSidebarOpen(false)}
-            >
+            <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X size={20} />
-            </button>
+            </Button>
           </div>
           <nav className="flex-1 px-4 py-6 space-y-2">{renderLinks()}</nav>
         </div>
@@ -82,29 +79,26 @@ const DashboardLayout = ({
 
       {/* Main */}
       <div className="flex-1 lg:ml-72">
-        <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-gray-200">
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur border-b border-border">
           <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="lg:hidden inline-flex items-center justify-center p-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-100"
+              <Button
+                variant="outline"
+                size="icon"
+                className="lg:hidden"
                 onClick={() => setSidebarOpen(true)}
               >
                 <Menu size={20} />
-              </button>
+              </Button>
               {onBack && (
-                <button
-                  type="button"
-                  onClick={onBack}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100"
-                >
-                  <ArrowLeft size={18} />
+                <Button variant="outline" size="sm" className="gap-2" onClick={onBack}>
+                  <ArrowLeft size={16} />
                   Back
-                </button>
+                </Button>
               )}
               <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{title}</h1>
-                {subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground">{title}</h1>
+                {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
               </div>
             </div>
             {actions && <div className="flex items-center gap-3">{actions}</div>}
