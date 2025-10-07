@@ -117,6 +117,7 @@ async function setupDatabase() {
           channel VARCHAR(50),
           status application_status DEFAULT 'sent',
           application_date DATE DEFAULT CURRENT_DATE,
+          applications_count INTEGER DEFAULT 1,
           created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -286,6 +287,18 @@ async function setupDatabase() {
     } else {
       console.log('Database tables detected. Ensuring schema completeness...');
     }
+
+    // Ensure new columns exist for evolved schema
+    await pool.query(`
+      ALTER TABLE applications
+      ADD COLUMN IF NOT EXISTS applications_count INTEGER DEFAULT 1
+    `);
+
+    await pool.query(`
+      UPDATE applications
+      SET applications_count = 1
+      WHERE applications_count IS NULL
+    `);
   } catch (error) {
     console.error('Database setup error:', error.message);
   }
@@ -328,11 +341,94 @@ app.post('/api/v1/auth/login', async (req, res) => {
 
     const token = jwt.sign({ userId: user.id, role: user.role }, SECRET_KEY, { expiresIn: '1d' });
 
-    res.json({ token, role: user.role, name: user.name });
+    res.json({ token, role: user.role, name: user.name, id: user.id });
 
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ message: 'Internal server error during login.' });
+  }
+});
+
+app.get('/api/v1/profile', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT id, name, email, role, daily_quota, created_at, updated_at
+      FROM users
+      WHERE id = $1
+    `,
+      [req.user.userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.put('/api/v1/profile', verifyToken, async (req, res) => {
+  try {
+    const { name, email, password, daily_quota } = req.body;
+
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const updates = [];
+    const params = [];
+    let idx = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${idx++}`);
+      params.push(name);
+    }
+
+    if (email !== undefined) {
+      updates.push(`email = $${idx++}`);
+      params.push(email);
+    }
+
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      updates.push(`password_hash = $${idx++}`);
+      params.push(hashed);
+    }
+
+    if (daily_quota !== undefined && req.user.role === 'Admin') {
+      updates.push(`daily_quota = $${idx++}`);
+      params.push(daily_quota);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No profile fields provided to update.' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+    params.push(req.user.userId);
+
+    const result = await pool.query(
+      `
+      UPDATE users
+      SET ${updates.join(', ')}
+      WHERE id = $${idx}
+      RETURNING id, name, email, role, daily_quota, created_at, updated_at
+    `,
+      params
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ message: 'Email already in use.' });
+    }
+    console.error('Error updating profile:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -342,8 +438,8 @@ app.get('/api/v1/candidates', verifyToken, async (req, res) => {
     const { stage, recruiter_id, search } = req.query;
     let query = `
       SELECT c.*, u.name as recruiter_name,
-             COUNT(DISTINCT a.id) as total_applications,
-             COUNT(DISTINCT CASE WHEN a.application_date = CURRENT_DATE THEN a.id END) as daily_applications
+             COALESCE(SUM(a.applications_count), 0) as total_applications,
+             COALESCE(SUM(CASE WHEN a.application_date = CURRENT_DATE THEN a.applications_count ELSE 0 END), 0) as daily_applications
       FROM candidates c
       LEFT JOIN users u ON c.assigned_recruiter_id = u.id
       LEFT JOIN applications a ON c.id = a.candidate_id
@@ -560,31 +656,151 @@ app.get('/api/v1/applications', verifyToken, async (req, res) => {
 
 app.post('/api/v1/applications', verifyToken, async (req, res) => {
   try {
-    const { candidate_id, company_name, job_title, job_description, channel } = req.body;
-    
-    const result = await pool.query(`
-      INSERT INTO applications (candidate_id, recruiter_id, company_name, job_title, job_description, channel)
-      VALUES ($1, $2, $3, $4, $5, $6)
+    const {
+      candidate_id,
+      company_name,
+      job_title,
+      job_description,
+      channel,
+      status,
+      applications_count,
+      application_date
+    } = req.body;
+
+    const allowedStatuses = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
+    const applicationsCount = Math.max(Number(applications_count) || 1, 1);
+    const applicationStatus = allowedStatuses.includes(status) ? status : 'sent';
+    const applicationDateParam = application_date || new Date().toISOString().split('T')[0];
+
+    const result = await pool.query(
+      `
+      INSERT INTO applications (
+        candidate_id,
+        recruiter_id,
+        company_name,
+        job_title,
+        job_description,
+        channel,
+        status,
+        applications_count,
+        application_date
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
-    `, [candidate_id, req.user.userId, company_name, job_title, job_description, channel]);
+    `,
+      [
+        candidate_id,
+        req.user.userId,
+        company_name,
+        job_title,
+        job_description,
+        channel,
+        applicationStatus,
+        applicationsCount,
+        applicationDateParam
+      ]
+    );
 
-    // Update daily activity
-    await pool.query(`
+    await pool.query(
+      `
       INSERT INTO daily_activity (user_id, applications_count)
-      VALUES ($1, 1)
+      VALUES ($1, $2)
       ON CONFLICT (user_id, activity_date)
-      DO UPDATE SET applications_count = daily_activity.applications_count + 1
-    `, [req.user.userId]);
+      DO UPDATE SET applications_count = daily_activity.applications_count + $2
+    `,
+      [req.user.userId, applicationsCount]
+    );
 
-    // Log audit
-    await pool.query(`
+    await pool.query(
+      `
       INSERT INTO audit_logs (user_id, action, table_name, record_id, new_values)
       VALUES ($1, 'CREATE', 'applications', $2, $3)
-    `, [req.user.userId, result.rows[0].id, JSON.stringify(result.rows[0])]);
+    `,
+      [req.user.userId, result.rows[0].id, JSON.stringify(result.rows[0])]
+    );
 
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating application:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, channel, application_date } = req.body;
+    const allowedStatuses = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
+
+    const existing = await pool.query('SELECT * FROM applications WHERE id = $1', [id]);
+
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
+
+    const application = existing.rows[0];
+
+    if (req.user.role !== 'Admin' && application.recruiter_id !== req.user.userId) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const applicationDate = application.application_date
+      ? new Date(application.application_date).toISOString().split('T')[0]
+      : today;
+
+    if (req.user.role !== 'Admin' && applicationDate !== today) {
+      return res.status(400).json({ message: 'Applications can only be modified on the day they are logged.' });
+    }
+
+    const updates = [];
+    const params = [];
+    let idx = 1;
+
+    if (status && allowedStatuses.includes(status)) {
+      updates.push(`status = $${idx++}`);
+      params.push(status);
+    }
+
+    if (channel !== undefined) {
+      updates.push(`channel = $${idx++}`);
+      params.push(channel);
+    }
+
+    if (application_date) {
+      updates.push(`application_date = $${idx++}`);
+      params.push(application_date);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No valid fields provided to update.' });
+    }
+
+    updates.push(`updated_at = CURRENT_TIMESTAMP`);
+
+    params.push(id);
+
+    const updated = await pool.query(
+      `
+      UPDATE applications
+      SET ${updates.join(', ')}
+      WHERE id = $${idx}
+      RETURNING *
+    `,
+      params
+    );
+
+    await pool.query(
+      `
+      INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+      VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
+    `,
+      [req.user.userId, id, JSON.stringify(application), JSON.stringify(updated.rows[0])]
+    );
+
+    res.json(updated.rows[0]);
+  } catch (error) {
+    console.error('Error updating application:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
