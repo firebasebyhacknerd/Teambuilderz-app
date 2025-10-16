@@ -5,6 +5,7 @@ import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import Textarea from '../../components/ui/textarea';
 import {
   useApplicationsQuery,
   useCandidatesQuery,
@@ -12,7 +13,6 @@ import {
 } from '../../lib/queryHooks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
-const INTERVIEW_TYPES = ['phone', 'video', 'in_person', 'technical', 'hr', 'final'];
 
 const ApplicationsPage = () => {
   const router = useRouter();
@@ -22,34 +22,15 @@ const ApplicationsPage = () => {
   const [userName, setUserName] = useState('Recruiter');
   const [userRole, setUserRole] = useState('Recruiter');
   const [formMessage, setFormMessage] = useState(null);
-  const [includeInterview, setIncludeInterview] = useState(false);
-  const [includeAssessment, setIncludeAssessment] = useState(false);
 
   const createDefaultFormValues = () => ({
     candidateId: '',
-    companyName: '',
-    jobTitle: '',
-    jobDescription: '',
-    channel: '',
-    status: 'sent',
-    applicationsCount: 1,
+    applicationsCount: 60,
     applicationDate: new Date().toISOString().split('T')[0],
+    reductionReason: '',
   });
 
   const [formValues, setFormValues] = useState(createDefaultFormValues);
-  const [interviewDetails, setInterviewDetails] = useState({
-    interviewType: 'phone',
-    roundNumber: 1,
-    scheduledDate: '',
-    timezone: 'UTC',
-    companyName: '',
-  });
-  const [assessmentDetails, setAssessmentDetails] = useState({
-    assessmentPlatform: '',
-    assessmentType: '',
-    dueDate: '',
-    notes: '',
-  });
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -104,6 +85,13 @@ const ApplicationsPage = () => {
     (sum, app) => sum + (Number(app.applications_count) || 0),
     0
   );
+  const needsReductionReason = Number(formValues.applicationsCount || 0) < 60;
+
+  useEffect(() => {
+    if (!needsReductionReason && formValues.reductionReason) {
+      setFormValues((prev) => ({ ...prev, reductionReason: '' }));
+    }
+  }, [needsReductionReason, formValues.reductionReason]);
 
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Admin') {
@@ -137,35 +125,17 @@ const ApplicationsPage = () => {
   const handleFormChange = (field) => (event) => {
     const value = event.target.value;
     setFormValues((prev) => ({ ...prev, [field]: value }));
+    if (formMessage) setFormMessage(null);
   };
 
-  const handleInterviewChange = (field) => (event) => {
-    const value = event.target.value;
-    setInterviewDetails((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleAssessmentChange = (field) => (event) => {
-    const value = event.target.value;
-    setAssessmentDetails((prev) => ({ ...prev, [field]: value }));
+  const handlePresetCount = (count) => {
+    setFormValues((prev) => ({ ...prev, applicationsCount: count }));
+    if (formMessage) setFormMessage(null);
   };
 
   const resetForm = () => {
     setFormValues(createDefaultFormValues());
-    setIncludeInterview(false);
-    setIncludeAssessment(false);
-    setInterviewDetails({
-      interviewType: 'phone',
-      roundNumber: 1,
-      scheduledDate: '',
-      timezone: 'UTC',
-      companyName: '',
-    });
-    setAssessmentDetails({
-      assessmentPlatform: '',
-      assessmentType: '',
-      dueDate: '',
-      notes: '',
-    });
+    setFormMessage(null);
   };
 
   const handleSubmit = (event) => {
@@ -174,67 +144,42 @@ const ApplicationsPage = () => {
 
     setFormMessage(null);
 
-    const trimmedCompany = formValues.companyName.trim();
-    const trimmedJobTitle = formValues.jobTitle.trim();
-    if (!formValues.candidateId || !trimmedCompany || !trimmedJobTitle) {
-      setFormMessage({ type: 'error', text: 'Candidate, company, and job title are required.' });
+    const applicationsCount = Math.max(Number(formValues.applicationsCount) || 0, 0);
+
+    if (!formValues.candidateId) {
+      setFormMessage({ type: 'error', text: 'Please select a candidate to attribute these applications.' });
       return;
     }
 
-    if (includeInterview && (!interviewDetails.scheduledDate || !interviewDetails.interviewType)) {
+    if (applicationsCount < 60 && !formValues.reductionReason.trim()) {
       setFormMessage({
         type: 'error',
-        text: 'Interview type and scheduled date are required when logging an interview.',
+        text: 'Please provide a short reason when logging fewer than 60 applications.',
       });
       return;
     }
 
-    if (includeAssessment && (!assessmentDetails.assessmentPlatform.trim() || !assessmentDetails.dueDate)) {
-      setFormMessage({
-        type: 'error',
-        text: 'Assessment platform and due date are required when logging an assessment.',
-      });
-      return;
-    }
+    const selectedCandidate = candidates.find((c) => c.id === Number(formValues.candidateId));
+    const candidateLabel = selectedCandidate?.name || 'General Application';
+    const reason = formValues.reductionReason.trim();
 
     const applicationPayload = {
       candidate_id: Number(formValues.candidateId),
-      company_name: trimmedCompany,
-      job_title: trimmedJobTitle,
-      job_description: formValues.jobDescription.trim() || undefined,
-      channel: formValues.channel.trim() || undefined,
-      status: formValues.status || 'sent',
-      applications_count: Math.max(Number(formValues.applicationsCount) || 1, 1),
+      company_name: `${candidateLabel} Outreach`,
+      job_title: 'General Application',
+      job_description: reason ? `Reduced quota reason: ${reason}` : undefined,
+      channel: 'Not specified',
+      status: 'sent',
+      applications_count: Math.max(applicationsCount, 0),
       application_date: formValues.applicationDate || undefined,
     };
 
-    const interviewPayload =
-      includeInterview
-        ? {
-            company_name: (interviewDetails.companyName || trimmedCompany).trim(),
-            interview_type: interviewDetails.interviewType,
-            round_number: Math.max(Number(interviewDetails.roundNumber) || 1, 1),
-            scheduled_date: new Date(interviewDetails.scheduledDate).toISOString(),
-            timezone: interviewDetails.timezone || 'UTC',
-          }
-        : null;
-
-    const assessmentPayload =
-      includeAssessment
-        ? {
-            assessment_platform: assessmentDetails.assessmentPlatform.trim(),
-            assessment_type: assessmentDetails.assessmentType.trim() || undefined,
-            due_date: assessmentDetails.dueDate,
-            notes: assessmentDetails.notes.trim() || undefined,
-          }
-        : null;
-
     logApplication.mutate({
       application: applicationPayload,
-      includeInterview,
-      includeAssessment,
-      interview: interviewPayload,
-      assessment: assessmentPayload,
+      includeInterview: false,
+      includeAssessment: false,
+      interview: null,
+      assessment: null,
     });
   };
 
@@ -255,7 +200,7 @@ const ApplicationsPage = () => {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Log New Application</h2>
             <p className="text-sm text-muted-foreground">
-              Capture application details and optionally add interview or assessment records in one go.
+              Log today&apos;s outreach volume. Target is 60 applications—add a quick note if you logged fewer.
             </p>
           </div>
 
@@ -271,7 +216,7 @@ const ApplicationsPage = () => {
             </div>
           )}
 
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-foreground">Candidate</label>
@@ -279,6 +224,7 @@ const ApplicationsPage = () => {
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   value={formValues.candidateId}
                   onChange={handleFormChange('candidateId')}
+                  required
                 >
                   <option value="">Select candidate</option>
                   {candidates.map((candidate) => (
@@ -287,205 +233,69 @@ const ApplicationsPage = () => {
                     </option>
                   ))}
                 </select>
+                <p className="text-xs text-muted-foreground">Choose who you advanced today.</p>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Company</label>
-                <Input
-                  value={formValues.companyName}
-                  onChange={handleFormChange('companyName')}
-                  placeholder="Company name"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Job Title</label>
-                <Input
-                  value={formValues.jobTitle}
-                  onChange={handleFormChange('jobTitle')}
-                  placeholder="Job title"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Channel</label>
-                <Input
-                  value={formValues.channel}
-                  onChange={handleFormChange('channel')}
-                  placeholder="LinkedIn, Email, Referral..."
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Status</label>
-                <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  value={formValues.status}
-                  onChange={handleFormChange('status')}
-                >
-                  {STATUS_OPTIONS.map((status) => (
-                    <option key={status} value={status}>
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Applications Count</label>
+                <label className="text-sm font-medium text-foreground">Applications Logged</label>
                 <Input
                   type="number"
-                  min={1}
+                  min={0}
                   value={formValues.applicationsCount}
                   onChange={handleFormChange('applicationsCount')}
+                  required
                 />
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {[60, 80, 100].map((preset) => (
+                    <Button
+                      key={preset}
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handlePresetCount(preset)}
+                    >
+                      {preset}
+                    </Button>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      handlePresetCount(Math.max(0, (Number(formValues.applicationsCount) || 0) + 10))
+                    }
+                  >
+                    +10
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Application Date</label>
+                <label className="text-sm font-medium text-foreground">Date</label>
                 <Input
                   type="date"
                   value={formValues.applicationDate}
                   onChange={handleFormChange('applicationDate')}
+                  required
                 />
               </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-medium text-foreground">Job Description / Notes</label>
-                <textarea
-                  rows={3}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  value={formValues.jobDescription}
-                  onChange={handleFormChange('jobDescription')}
-                  placeholder="Optional summary or additional notes"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-3 border-t border-border pt-4">
-              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
-                  checked={includeInterview}
-                  onChange={(event) => setIncludeInterview(event.target.checked)}
-                />
-                Log follow-up interview details
-              </label>
-
-              {includeInterview && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded-md border-border bg-muted/30 p-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Interview Type</label>
-                    <select
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={interviewDetails.interviewType}
-                      onChange={handleInterviewChange('interviewType')}
-                    >
-                      {INTERVIEW_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type.replace(/_/g, ' ')}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Round Number</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={interviewDetails.roundNumber}
-                      onChange={handleInterviewChange('roundNumber')}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Scheduled Date &amp; Time</label>
-                    <Input
-                      type="datetime-local"
-                      value={interviewDetails.scheduledDate}
-                      onChange={handleInterviewChange('scheduledDate')}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Timezone</label>
-                    <Input
-                      value={interviewDetails.timezone}
-                      onChange={handleInterviewChange('timezone')}
-                      placeholder="UTC, PST, EST..."
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-sm font-medium text-foreground">Interview Company (optional)</label>
-                    <Input
-                      value={interviewDetails.companyName}
-                      onChange={handleInterviewChange('companyName')}
-                      placeholder="Defaults to application company"
-                    />
-                  </div>
+              {needsReductionReason && (
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-medium text-foreground">Reason for fewer than 60 applications</label>
+                  <Textarea
+                    value={formValues.reductionReason}
+                    onChange={handleFormChange('reductionReason')}
+                    placeholder="Share why today's quota is reduced (e.g., interview day, sourcing research, PTO)."
+                    rows={3}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Admins use this to track quota adjustments. Keep it brief but clear.
+                  </p>
                 </div>
               )}
             </div>
-
-            <div className="space-y-3 border-t border-border pt-4">
-              <label className="flex items-center gap-2 text-sm font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
-                  checked={includeAssessment}
-                  onChange={(event) => setIncludeAssessment(event.target.checked)}
-                />
-                Log assessment assignment
-              </label>
-
-              {includeAssessment && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border rounded-md border-border bg-muted/30 p-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Assessment Platform</label>
-                    <Input
-                      value={assessmentDetails.assessmentPlatform}
-                      onChange={handleAssessmentChange('assessmentPlatform')}
-                      placeholder="Coderbyte, HackerRank..."
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Assessment Type</label>
-                    <Input
-                      value={assessmentDetails.assessmentType}
-                      onChange={handleAssessmentChange('assessmentType')}
-                      placeholder="Technical, Personality..."
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">Due Date</label>
-                    <Input
-                      type="date"
-                      value={assessmentDetails.dueDate}
-                      onChange={handleAssessmentChange('dueDate')}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <label className="text-sm font-medium text-foreground">Notes</label>
-                    <textarea
-                      rows={3}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      value={assessmentDetails.notes}
-                      onChange={handleAssessmentChange('notes')}
-                      placeholder="Optional prep notes or instructions"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div className="flex justify-end gap-3 pt-2">
               <Button
                 type="button"
@@ -598,3 +408,4 @@ const SummaryCard = ({ label, value }) => (
 );
 
 export default ApplicationsPage;
+

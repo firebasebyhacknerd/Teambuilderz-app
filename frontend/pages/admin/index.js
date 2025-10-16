@@ -1,114 +1,88 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
   Briefcase,
-  ChevronRight,
   BarChart3,
   Target,
-  UserPlus,
   FileText,
-  Calendar,
   AlertTriangle,
   Home,
-  LogOut
+  LogOut,
+  PieChart,
+  TrendingUp,
+  ClipboardList,
+  MessageSquare,
+  Bell,
+  CalendarClock,
+  ChevronRight,
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import API_URL from '../../lib/api';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import {
+  useAdminOverviewQuery,
+  useAdminActivityQuery,
+  useNotificationsQuery,
+} from '../../lib/queryHooks';
+
+const numberFormatter = new Intl.NumberFormat();
+const percentFormatter = new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 0 });
+const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
 
 const AdminDashboard = () => {
   const router = useRouter();
-  const [candidates, setCandidates] = useState([]);
-  const [performance, setPerformance] = useState([]);
-  const [weeklyPerformance, setWeeklyPerformance] = useState([]);
-  const [monthlyPerformance, setMonthlyPerformance] = useState([]);
-  const [alerts, setAlerts] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Admin');
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const role = localStorage.getItem('userRole');
-    if (!token) {
+    const storedToken = localStorage.getItem('token');
+    const storedRole = localStorage.getItem('userRole');
+    if (!storedToken) {
       router.push('/login');
       return;
     }
-
-    if (role !== 'Admin') {
+    if (storedRole !== 'Admin') {
       router.replace('/recruiter');
       return;
     }
-
-    const fetchData = async (endpoint, setter) => {
-      try {
-        const response = await fetch(`${API_URL}${endpoint}`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        if (response.status === 403 || response.status === 401) {
-            router.push('/login');
-            return;
-        }
-        if (!response.ok) {
-          console.error(`Request to ${endpoint} failed with status ${response.status}`);
-          setter([]);
-          return;
-        }
-        const data = await response.json().catch(() => null);
-        if (Array.isArray(data)) {
-          setter(data);
-        } else if (data && Array.isArray(data.data)) {
-          setter(data.data);
-        } else {
-          console.warn(`Unexpected payload for ${endpoint}.`, data);
-          setter([]);
-        }
-      } catch (error) {
-        console.error(`Error fetching ${endpoint}:`, error.message);
-        setter([]);
-      }
-    };
-
-    // Weekly: last 7 days
-    const today = new Date();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(today.getDate() - 6);
-    const weekFrom = weekAgo.toISOString().split('T')[0];
-    const weekTo = today.toISOString().split('T')[0];
-
-    // Monthly: first day of month to today
-    const monthFrom = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const monthTo = today.toISOString().split('T')[0];
-
-    const loadUserName = () => {
-      const storedName = localStorage.getItem('userName');
-      if (storedName) {
-        setUserName(storedName);
-      }
-    };
-
-    Promise.all([
-      fetchData('/api/v1/candidates', setCandidates),
-      fetchData('/api/v1/reports/performance', setPerformance),
-      fetchData(`/api/v1/reports/performance?date_from=${weekFrom}&date_to=${weekTo}`, setWeeklyPerformance),
-      fetchData(`/api/v1/reports/performance?date_from=${monthFrom}&date_to=${monthTo}`, setMonthlyPerformance),
-      fetchData('/api/v1/alerts', setAlerts)
-    ])
-      .finally(() => setLoading(false));
-
-    loadUserName();
-
+    setToken(storedToken);
+    const storedName = localStorage.getItem('userName');
+    if (storedName) {
+      setUserName(storedName);
+    }
   }, [router]);
 
-  const totalCandidates = candidates.length;
-  const totalRecruiters = performance.length;
-  const totalApplications = performance.reduce((sum, r) => sum + parseInt(r.apps_total_period || 0), 0);
-  const openAlerts = alerts.filter(a => a.status === 'open').length;
+  const { data: overview, isLoading: overviewLoading } = useAdminOverviewQuery(token, Boolean(token));
+  const { data: activity, isLoading: activityLoading } = useAdminActivityQuery(token, Boolean(token));
+  const { data: notifications, isLoading: notificationsLoading } = useNotificationsQuery(token, Boolean(token));
 
-  // Calculate weekly and monthly averages for all recruiters
-  const weeklyAvg = weeklyPerformance.length > 0 ? Math.round(weeklyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / weeklyPerformance.length) : 0;
-  const monthlyAvg = monthlyPerformance.length > 0 ? Math.round(monthlyPerformance.reduce((sum, r) => sum + parseFloat(r.avg_apps_per_day || 0), 0) / monthlyPerformance.length) : 0;
+  const summary = overview?.summary ?? {
+    totalCandidates: 0,
+    activeCandidates: 0,
+    marketingCandidates: 0,
+    avgCandidateTenureDays: 0,
+    totalRecruiters: 0,
+    totalApplicationsToday: 0,
+    totalInterviewsToday: 0,
+    totalAssessmentsToday: 0,
+  };
+  const candidateStages = overview?.candidateStages ?? [];
+  const marketingVelocity = overview?.marketingVelocity ?? {
+    avgApplicationsPerCandidate: 0,
+    avgDaysSinceLastApplication: 0,
+  };
+  const recruiterProductivity = overview?.recruiterProductivity ?? [];
+
+  const recentNotes = activity?.recentNotes ?? [];
+  const upcomingReminders = activity?.upcomingReminders ?? [];
+  const centerReminders = notifications?.reminders ?? [];
+  const centerAlerts = notifications?.alerts ?? [];
+
+  const isLoading = overviewLoading || activityLoading || notificationsLoading || !token;
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -121,15 +95,13 @@ const AdminDashboard = () => {
     { href: '/admin', label: 'Dashboard', icon: Home },
     { href: '/admin/candidates', label: 'Candidates', icon: Users },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
   ];
 
-  if (loading) {
+  if (isLoading) {
     return (
       <DashboardLayout title="Admin Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
-        <div className="h-48 flex items-center justify-center">
-          <p className="text-gray-500">Loading dashboard…</p>
-        </div>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading dashboard...</div>
       </DashboardLayout>
     );
   }
@@ -146,54 +118,138 @@ const AdminDashboard = () => {
         </Button>
       }
     >
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-8">
-        <KpiCard icon={<Users className="h-5 w-5 text-blue-600" />} title="Total Candidates" value={totalCandidates} accent="bg-blue-100 text-blue-700" />
-        <KpiCard icon={<Briefcase className="h-5 w-5 text-emerald-600" />} title="Total Recruiters" value={totalRecruiters} accent="bg-emerald-100 text-emerald-700" />
-        <KpiCard icon={<BarChart3 className="h-5 w-5 text-purple-600" />} title="Total Applications" value={totalApplications} accent="bg-purple-100 text-purple-700" />
-        <KpiCard icon={<Target className="h-5 w-5 text-yellow-600" />} title="Weekly Avg Apps/Day" value={weeklyAvg} accent="bg-yellow-100 text-yellow-700" />
-        <KpiCard icon={<Target className="h-5 w-5 text-pink-600" />} title="Monthly Avg Apps/Day" value={monthlyAvg} accent="bg-pink-100 text-pink-700" />
-        <KpiCard icon={<AlertTriangle className="h-5 w-5 text-red-600" />} title="Open Alerts" value={openAlerts} accent="bg-red-100 text-red-700" />
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+        <KpiCard icon={<Users className="h-5 w-5 text-primary" />} title="Total Candidates" value={summary.totalCandidates} accent="bg-primary/10 text-primary" />
+        <KpiCard icon={<Briefcase className="h-5 w-5 text-emerald-600" />} title="Active Recruiters" value={summary.totalRecruiters} accent="bg-emerald-100 text-emerald-700" />
+        <KpiCard icon={<BarChart3 className="h-5 w-5 text-blue-600" />} title="Applications Today" value={summary.totalApplicationsToday} accent="bg-blue-100 text-blue-700" />
+        <KpiCard icon={<Target className="h-5 w-5 text-pink-600" />} title="Interviews Today" value={summary.totalInterviewsToday} accent="bg-pink-100 text-pink-700" />
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <QuickActionCard
-          icon={<UserPlus className="h-5 w-5 text-blue-600" />}
-          title="Manage Candidates"
-          description="Add, edit, and track candidates"
-          onClick={() => router.push('/admin/candidates')}
-          accent="bg-blue-100 text-blue-700"
-        />
-        <QuickActionCard
-          icon={<FileText className="h-5 w-5 text-emerald-600" />}
-          title="View Applications"
-          description="Track all job applications"
-          onClick={() => router.push('/recruiter/applications')}
-          accent="bg-emerald-100 text-emerald-700"
-        />
-        <QuickActionCard
-          icon={<Calendar className="h-5 w-5 text-purple-600" />}
-          title="Schedule Interviews"
-          description="Manage interview schedules"
-          onClick={() => router.push('/recruiter/interviews')}
-          accent="bg-purple-100 text-purple-700"
-        />
-        <QuickActionCard
-          icon={<AlertTriangle className="h-5 w-5 text-red-600" />}
-          title="View Alerts"
-          description="Check notifications and alerts"
-          onClick={() => router.push('/alerts')}
-          accent="bg-red-100 text-red-700"
-        />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <PieChart className="h-5 w-5 text-primary" />
+                Candidate Pipeline
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Average tenure {numberFormatter.format(Math.round(summary.avgCandidateTenureDays))} days across the bench.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {candidateStages.length === 0 ? (
+              <p className="text-sm text-muted-foreground col-span-2">No candidate pipeline data available.</p>
+            ) : (
+              candidateStages.map((stage) => (
+                <StageChip key={stage.stage} label={stage.stage} count={stage.count} total={summary.totalCandidates || 1} />
+              ))
+            )}
+          </div>
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-emerald-600" />
+                Marketing Velocity
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Keep outreach momentum steady and spot dormant candidates quickly.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <MetricTile label="Avg apps per candidate" value={marketingVelocity.avgApplicationsPerCandidate.toFixed(1)} tone="bg-emerald-50 text-emerald-700" />
+            <MetricTile label="Avg days since last app" value={marketingVelocity.avgDaysSinceLastApplication.toFixed(1)} tone="bg-amber-50 text-amber-700" />
+            <MetricTile label="Marketing candidates" value={summary.marketingCandidates} tone="bg-blue-50 text-blue-700" />
+            <MetricTile label="Active candidates" value={summary.activeCandidates} tone="bg-purple-50 text-purple-700" />
+          </div>
+        </Card>
       </div>
 
-      <Card className="p-0">
-        <h2 className="px-6 py-4 text-xl font-bold text-gray-800 border-b border-gray-200">Recruiter Performance</h2>
-        <div className="divide-y divide-gray-200">
-          {performance.length === 0 && <p className="p-4 text-gray-500">No recruiter data found.</p>}
-          {performance.map((recruiter, index) => (
-            <RecruiterListItem key={index} recruiter={recruiter} />
-          ))}
+      <Card className="p-0 mb-8">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+          <h2 className="text-xl font-bold text-foreground">Recruiter Productivity</h2>
+          <p className="text-xs text-muted-foreground">Tracking applications, interviews, and trend averages.</p>
+        </div>
+        <div className="divide-y divide-border">
+          {recruiterProductivity.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">No recruiter productivity data found.</p>
+          ) : (
+            recruiterProductivity.map((recruiter) => (
+              <RecruiterListItem key={recruiter.id} recruiter={recruiter} />
+            ))
+          )}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+        <Card className="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-primary" />
+            Recent Collaboration
+          </h3>
+          {recentNotes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recent notes logged.</p>
+          ) : (
+            <div className="space-y-3">
+              {recentNotes.map((note) => (
+                <ActivityNoteItem key={note.id} note={note} />
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <CalendarClock className="h-5 w-5 text-amber-600" />
+            Upcoming Reminders
+          </h3>
+          {upcomingReminders.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active reminders scheduled.</p>
+          ) : (
+            <div className="space-y-3">
+              {upcomingReminders.map((reminder) => (
+                <ReminderItem key={reminder.id} reminder={reminder} />
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card className="p-6 space-y-4">
+        <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <Bell className="h-5 w-5 text-orange-600" />
+          Notification Center
+        </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Reminders</h4>
+            {centerReminders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending reminders.</p>
+            ) : (
+              <div className="space-y-2">
+                {centerReminders.map((reminder) => (
+                  <NotificationReminder key={reminder.id} reminder={reminder} />
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Alerts</h4>
+            {centerAlerts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">All clear! No open alerts.</p>
+            ) : (
+              <div className="space-y-2">
+                {centerAlerts.map((alert) => (
+                  <NotificationAlert key={alert.id} alert={alert} />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </Card>
     </DashboardLayout>
@@ -202,45 +258,133 @@ const AdminDashboard = () => {
 
 const KpiCard = ({ icon, title, value, accent }) => (
   <Card className="flex items-center gap-3 p-5">
-    <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>
-      {icon}
-    </div>
+    <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
     <div>
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
-      <p className="text-2xl font-semibold text-foreground">{value}</p>
+      <p className="text-2xl font-semibold text-foreground">{numberFormatter.format(value)}</p>
     </div>
   </Card>
 );
 
-const QuickActionCard = ({ icon, title, description, onClick, accent }) => (
-  <Card className="p-5 border-dashed hover:border-primary/40 transition-colors cursor-pointer" onClick={onClick}>
-    <div className="flex items-center gap-3">
-      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
+const StageChip = ({ label, count, total }) => {
+  const stageLabel = label
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+  const percentage = total > 0 ? count / total : 0;
+
+  return (
+    <div className="rounded-lg border border-border bg-background/80 px-4 py-3 flex items-center justify-between">
       <div>
-        <h3 className="text-base font-semibold text-foreground">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <p className="text-sm font-semibold text-foreground">{stageLabel}</p>
+        <p className="text-xs text-muted-foreground">{numberFormatter.format(count)} candidates</p>
       </div>
+      <span className="text-sm font-semibold text-primary">{percentFormatter.format(percentage)}</span>
     </div>
-  </Card>
+  );
+};
+
+const MetricTile = ({ label, value, tone }) => (
+  <div className={`rounded-lg px-4 py-3 ${tone ?? 'bg-muted text-foreground'}`}>
+    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+    <p className="text-xl font-semibold text-foreground">{value}</p>
+  </div>
 );
 
 const RecruiterListItem = ({ recruiter }) => {
-    const isBelowTarget = recruiter.avg_apps_per_day < recruiter.daily_quota;
-    return (
-        <div className="flex justify-between items-center px-6 py-3 hover:bg-white/90 transition duration-150 ease-in-out cursor-pointer">
-            <div className="flex flex-col">
-                <span className="font-semibold text-gray-800">{recruiter.recruiter_name}</span>
-                <span className="text-sm text-gray-500">Candidates: {recruiter.total_candidates}</span>
-            </div>
-            <div className="flex flex-col items-end">
-                <span className={`text-sm font-medium ${isBelowTarget ? 'text-red-600' : 'text-green-600'}`}>
-                    {Math.round(recruiter.avg_apps_per_day || 0)} / {recruiter.daily_quota} Avg Apps/Day
-                </span>
-                <span className="text-xs text-gray-500">{recruiter.apps_total_period || 0} Total Apps</span>
-            </div>
-            <ChevronRight size={18} className="text-gray-400 ml-4" />
-        </div>
-    );
+  const quota = Number(recruiter.dailyQuota || recruiter.daily_quota || 0);
+  const avgPerDay7 = recruiter.avgApplicationsLast7Days ?? recruiter.avg_apps_last_7 ?? 0;
+  const avgPerDay30 = recruiter.avgApplicationsLast30Days ?? recruiter.avg_apps_last_30 ?? 0;
+  const applicationsToday = recruiter.applicationsToday ?? recruiter.applications_today ?? 0;
+  const shortfall = quota > 0 ? applicationsToday - quota : applicationsToday;
+
+  return (
+    <div className="flex justify-between items-center px-6 py-3 hover:bg-muted/50 transition cursor-pointer">
+      <div className="flex flex-col">
+        <span className="font-semibold text-foreground">{recruiter.name}</span>
+        <span className="text-xs text-muted-foreground">Quota: {quota}</span>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        <span className={`text-sm font-medium ${quota && applicationsToday < quota ? 'text-red-600' : 'text-emerald-600'}`}>
+          {applicationsToday} / {quota || '—'} Apps today
+        </span>
+        <span className="text-xs text-muted-foreground">
+          7-day avg {avgPerDay7.toFixed(1)} • 30-day avg {avgPerDay30.toFixed(1)}
+        </span>
+        {quota > 0 && (
+          <span className={`text-xs font-medium ${shortfall < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
+            {shortfall < 0 ? `${Math.abs(shortfall)} below target` : 'On track'}
+          </span>
+        )}
+      </div>
+      <ChevronRight size={18} className="text-muted-foreground ml-4" />
+    </div>
+  );
 };
+
+const ActivityNoteItem = ({ note }) => (
+  <div className="rounded-lg border border-border bg-card/60 p-4 shadow-sm">
+    <div className="flex justify-between items-center gap-3">
+      <div>
+        <p className="text-sm font-semibold text-foreground">
+          {note.author?.name}
+          {note.isPrivate && <span className="ml-2 text-xs text-muted-foreground">(Private)</span>}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {note.candidateName} • {dateTimeFormatter.format(new Date(note.createdAt))}
+        </p>
+      </div>
+    </div>
+    <p className="mt-3 text-sm leading-relaxed text-foreground">{note.content}</p>
+  </div>
+);
+
+const ReminderItem = ({ reminder }) => (
+  <div className="rounded-lg border border-border bg-amber-50 px-4 py-3 text-xs text-amber-800 flex flex-col gap-1">
+    <div className="flex items-center justify-between">
+      <span className="font-semibold">{reminder.title}</span>
+      <span className="font-medium">
+        {dateTimeFormatter.format(new Date(reminder.dueDate))}
+      </span>
+    </div>
+    {reminder.description && <p className="text-amber-700/80">{reminder.description}</p>}
+    <div className="flex items-center justify-between text-amber-700/70">
+      <span>
+        Owner: {reminder.owner?.name ?? 'Unassigned'}
+        {reminder.candidate?.name ? ` • ${reminder.candidate.name}` : ''}
+      </span>
+      <span>Priority {reminder.priority}</span>
+    </div>
+  </div>
+);
+
+const NotificationReminder = ({ reminder }) => (
+  <div className="rounded-md border border-border px-3 py-2 text-sm bg-muted/40">
+    <div className="flex items-center justify-between">
+      <span className="font-medium text-foreground">{reminder.title}</span>
+      <span className="text-xs text-muted-foreground">
+        {dateTimeFormatter.format(new Date(reminder.dueDate))}
+      </span>
+    </div>
+    {reminder.description && <p className="text-xs text-muted-foreground mt-1">{reminder.description}</p>}
+    <p className="text-xs text-muted-foreground mt-1">
+      {reminder.owner?.name ?? 'Unassigned'}
+      {reminder.candidate?.name ? ` • ${reminder.candidate.name}` : ''}
+    </p>
+  </div>
+);
+
+const NotificationAlert = ({ alert }) => (
+  <div className="rounded-md border border-border px-3 py-2 text-sm bg-muted/40">
+    <div className="flex items-center justify-between">
+      <span className="font-medium text-foreground">{alert.title}</span>
+      <span className="text-xs text-muted-foreground">{alert.type}</span>
+    </div>
+    <p className="text-xs text-muted-foreground mt-1">{alert.message}</p>
+    <p className="text-xs text-muted-foreground mt-1">
+      Owner: {alert.owner?.name ?? 'Unassigned'} • Priority {alert.priority}
+    </p>
+  </div>
+);
 
 export default AdminDashboard;
