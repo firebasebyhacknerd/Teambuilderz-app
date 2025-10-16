@@ -30,8 +30,14 @@ const AdminDashboard = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
+    const role = localStorage.getItem('userRole');
     if (!token) {
       router.push('/login');
+      return;
+    }
+
+    if (role !== 'Admin') {
+      router.replace('/recruiter');
       return;
     }
 

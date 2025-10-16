@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ArrowLeft, Menu, X } from 'lucide-react';
@@ -48,18 +49,23 @@ const DashboardLayout = ({
     });
 
   return (
-    <div className="min-h-screen bg-muted/20 flex">
+    <div className="min-h-screen bg-[hsl(var(--background))] flex">
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-72 bg-background border-r border-border shadow-lg transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-72 bg-card border-r border-border shadow-lg transform transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         }`}
       >
         <div className="h-full flex flex-col overflow-y-auto">
           <div className="px-6 py-5 border-b border-border flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wider text-muted-foreground">TeamBuilderz</p>
-              <h2 className="text-lg font-semibold text-foreground">Control Center</h2>
+            <div className="flex items-center gap-3">
+              <div className="relative h-12 w-12 rounded-xl bg-secondary/60 flex items-center justify-center ring-2 ring-primary/20">
+                <Image src="/logo.svg" alt="TeamBuilderz logo" width={42} height={42} priority />
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">TeamBuilderz</p>
+                <h2 className="text-lg font-semibold text-foreground">Growth Console</h2>
+              </div>
             </div>
             <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setSidebarOpen(false)}>
               <X size={20} />
@@ -78,8 +84,8 @@ const DashboardLayout = ({
       )}
 
       {/* Main */}
-      <div className="flex-1 lg:ml-72">
-        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur border-b border-border">
+      <div className="flex-1 lg:ml-72 bg-gradient-to-br from-white via-[hsl(var(--background))] to-white">
+        <header className="sticky top-0 z-10 bg-background/85 backdrop-blur border-b border-border">
           <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Button

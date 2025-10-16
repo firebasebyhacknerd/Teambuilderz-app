@@ -1,6 +1,10 @@
 # Ignore node_modules
 node_modules/
 
+# Build output
+.next/
+frontend/.next/
+
 # Ignore large binaries
 postgresql-installer.exe
 postgresql-installer-new.exe

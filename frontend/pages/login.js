@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Image from 'next/image';
 import { LogIn, User, Lock } from 'lucide-react';
 import {
   Card,
@@ -58,14 +59,16 @@ const LoginPage = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-100 via-slate-100 to-purple-100 p-4">
-      <Card className="w-full max-w-md shadow-lg backdrop-blur">
-        <CardHeader className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
-            <LogIn className="w-6 h-6" />
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(140,25%,96%)] via-[hsl(144,28%,92%)] to-[hsl(28,88%,96%)] p-4">
+      <Card className="w-full max-w-md shadow-lg backdrop-blur-sm border border-border/70">
+        <CardHeader className="text-center space-y-3">
+          <div className="mx-auto w-16 h-16 rounded-xl bg-secondary/70 flex items-center justify-center ring-2 ring-primary/15">
+            <Image src="/logo.svg" alt="TeamBuilderz" width={48} height={48} priority />
           </div>
-          <CardTitle className="text-3xl font-semibold text-gray-900">Staffing Architect</CardTitle>
-          <CardDescription>Internal Access Portal</CardDescription>
+          <CardTitle className="text-3xl font-semibold text-foreground">TeamBuilderz Portal</CardTitle>
+          <CardDescription className="text-sm text-muted-foreground">
+            Sign in to orchestrate candidates, applications, and interviews with confidence.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -103,7 +106,7 @@ const LoginPage = () => {
               </div>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Authenticating…' : 'Sign In'}
+              {loading ? 'Authenticating...' : 'Sign In'}
             </Button>
           </form>
         </CardContent>
