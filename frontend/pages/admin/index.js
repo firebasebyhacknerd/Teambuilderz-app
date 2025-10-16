@@ -44,10 +44,23 @@ const AdminDashboard = () => {
             router.push('/login');
             return;
         }
-        const data = await response.json();
-        setter(data);
+        if (!response.ok) {
+          console.error(`Request to ${endpoint} failed with status ${response.status}`);
+          setter([]);
+          return;
+        }
+        const data = await response.json().catch(() => null);
+        if (Array.isArray(data)) {
+          setter(data);
+        } else if (data && Array.isArray(data.data)) {
+          setter(data.data);
+        } else {
+          console.warn(`Unexpected payload for ${endpoint}.`, data);
+          setter([]);
+        }
       } catch (error) {
         console.error(`Error fetching ${endpoint}:`, error.message);
+        setter([]);
       }
     };
 
