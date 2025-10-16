@@ -28,6 +28,7 @@ export const queryKeys = {
   applications: (token) => ['applications', token],
   candidates: (token) => ['candidates', token],
   reports: (token, scope) => ['reports', scope, token],
+  candidateNotes: (token, candidateId) => ['candidate-notes', token, candidateId],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -116,6 +117,45 @@ export const useLogApplicationMutation = (token, options = {}) => {
     },
     onSuccess: (...args) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.applications(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useCandidateNotesQuery = (token, candidateId, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.candidateNotes(token, candidateId),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}/notes`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load candidate notes.');
+    },
+    enabled: Boolean(token) && Boolean(candidateId) && enabled,
+    placeholderData: [],
+    refetchInterval: 10000,
+  });
+
+export const useCreateCandidateNoteMutation = (token, candidateId, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}/notes`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+
+      return handleResponse(response, 'Unable to log note.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.candidateNotes(token, candidateId),
+      });
       if (options?.onSuccess) {
         options.onSuccess(...args);
       }

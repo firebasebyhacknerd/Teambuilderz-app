@@ -1,12 +1,35 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { User, Briefcase, Target, TrendingUp, Edit, Save, X, Home, FileText, AlertTriangle } from 'lucide-react';
+import {
+  User,
+  Briefcase,
+  Target,
+  TrendingUp,
+  Edit,
+  Save,
+  X,
+  Home,
+  FileText,
+  AlertTriangle,
+  MessageSquare,
+  Lock,
+  Bell,
+} from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card } from '../../../components/ui/card';
 import { Button } from '../../../components/ui/button';
 import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
+import { Label } from '../../../components/ui/label';
+import Textarea from '../../../components/ui/textarea';
 import DashboardLayout from '../../../components/Layout/DashboardLayout';
 import API_URL from '../../../lib/api';
+import {
+  queryKeys,
+  useCandidatesQuery,
+  useCandidateNotesQuery,
+  useCreateCandidateNoteMutation,
+} from '../../../lib/queryHooks';
 
 const sidebarLinks = [
   { href: '/recruiter', label: 'Dashboard', icon: Home },
@@ -26,52 +49,70 @@ const stageBadges = {
 const CandidateDetailPage = () => {
   const router = useRouter();
   const { id } = router.query;
-  const [candidate, setCandidate] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const [token, setToken] = useState('');
   const [editing, setEditing] = useState(false);
   const [dailyApps, setDailyApps] = useState(0);
   const [totalApps, setTotalApps] = useState(0);
   const [error, setError] = useState('');
+  const [noteContent, setNoteContent] = useState('');
+  const [noteIsPrivate, setNoteIsPrivate] = useState(false);
+  const [noteFollowUpEnabled, setNoteFollowUpEnabled] = useState(false);
+  const [noteFollowUpDueDate, setNoteFollowUpDueDate] = useState('');
+  const [noteFollowUpTitle, setNoteFollowUpTitle] = useState('');
+  const [noteFollowUpDescription, setNoteFollowUpDescription] = useState('');
+  const [noteFollowUpPriority, setNoteFollowUpPriority] = useState(1);
+  const [noteMessage, setNoteMessage] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    const storedToken = localStorage.getItem('token');
+    if (!storedToken) {
       router.push('/login');
       return;
     }
-    if (id) {
-      fetchCandidateDetails();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setToken(storedToken);
+  }, [router]);
+
+  const candidateId = useMemo(() => {
+    if (!id) return null;
+    const numericId = Array.isArray(id) ? parseInt(id[0], 10) : parseInt(id, 10);
+    return Number.isNaN(numericId) ? null : numericId;
   }, [id]);
 
-  const fetchCandidateDetails = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/v1/candidates`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+  const { data: candidates = [], isLoading: candidatesLoading } = useCandidatesQuery(token, Boolean(token));
 
-      if (response.status === 401 || response.status === 403) {
-        router.push('/login');
-        return;
-      }
+  const candidate = useMemo(
+    () => candidates.find((c) => c.id === candidateId),
+    [candidates, candidateId]
+  );
 
-      const candidates = await response.json();
-      const candidateData = candidates.find((c) => c.id === parseInt(id, 10));
-
-      if (candidateData) {
-        setCandidate(candidateData);
-        setDailyApps(candidateData.daily_applications || 0);
-        setTotalApps(candidateData.total_applications || 0);
-      }
-    } catch (fetchError) {
-      console.error('Error fetching candidate details:', fetchError);
-      setError('Unable to load candidate information.');
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (candidate && !editing) {
+      setDailyApps(candidate.daily_applications || 0);
+      setTotalApps(candidate.total_applications || 0);
     }
-  };
+  }, [candidate, editing]);
+
+  const {
+    data: notes = [],
+    isLoading: notesLoading,
+  } = useCandidateNotesQuery(token, candidateId, Boolean(token && candidateId));
+
+  const createNote = useCreateCandidateNoteMutation(token, candidateId, {
+    onSuccess: () => {
+      setNoteMessage({ type: 'success', text: 'Note added successfully.' });
+      setNoteContent('');
+      setNoteIsPrivate(false);
+      setNoteFollowUpEnabled(false);
+      setNoteFollowUpDueDate('');
+      setNoteFollowUpTitle('');
+      setNoteFollowUpDescription('');
+      setNoteFollowUpPriority(1);
+    },
+    onError: (mutationError) => {
+      setNoteMessage({ type: 'error', text: mutationError.message || 'Unable to add note.' });
+    },
+  });
 
   const handleSave = async () => {
     try {
@@ -93,11 +134,9 @@ const CandidateDetailPage = () => {
         throw new Error(data.message || 'Failed to update candidate.');
       }
 
-      setCandidate((prev) => ({
-        ...prev,
-        daily_applications: dailyApps,
-        total_applications: totalApps
-      }));
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.candidates(token),
+      });
       setEditing(false);
       setError('');
     } catch (updateError) {
@@ -107,10 +146,47 @@ const CandidateDetailPage = () => {
   };
 
   const handleCancel = () => {
+    if (!candidate) return;
     setDailyApps(candidate.daily_applications || 0);
     setTotalApps(candidate.total_applications || 0);
     setEditing(false);
     setError('');
+  };
+
+  const handleNoteSubmit = (event) => {
+    event.preventDefault();
+    if (!candidateId || !noteContent.trim()) {
+      setNoteMessage({ type: 'error', text: 'Please enter a note before saving.' });
+      return;
+    }
+
+    const payload = {
+      content: noteContent.trim(),
+      isPrivate: noteIsPrivate,
+    };
+
+    if (noteFollowUpEnabled && noteFollowUpDueDate) {
+      payload.followUp = {
+        dueDate: noteFollowUpDueDate,
+        title: noteFollowUpTitle,
+        description: noteFollowUpDescription,
+        priority: noteFollowUpPriority,
+      };
+    }
+
+    createNote.mutate(payload);
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return 'Unknown time';
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(value));
+    } catch (err) {
+      return String(value);
+    }
   };
 
   const stageLabel = useMemo(() => {
@@ -123,7 +199,9 @@ const CandidateDetailPage = () => {
 
   const primarySkill = useMemo(() => candidate?.skills?.[0] || 'N/A', [candidate?.skills]);
 
-  if (loading) {
+  const isLoadingCandidate = candidatesLoading || !token || (candidateId !== null && !candidate);
+
+  if (isLoadingCandidate) {
     return (
       <DashboardLayout title="Candidate Detail" links={sidebarLinks} onBack={() => router.push('/recruiter')}>
         <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidate...</div>
@@ -131,7 +209,7 @@ const CandidateDetailPage = () => {
     );
   }
 
-  if (!candidate) {
+  if (!candidate && !isLoadingCandidate && candidateId !== null) {
     return (
       <DashboardLayout title="Candidate Detail" links={sidebarLinks} onBack={() => router.push('/recruiter')}>
         <div className="h-48 flex flex-col items-center justify-center space-y-2 text-muted-foreground">
@@ -225,6 +303,178 @@ const CandidateDetailPage = () => {
           />
         </Card>
       </div>
+
+      <Card className="p-6 space-y-5 mt-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-primary" />
+              Collaboration Feed
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Share updates, blockers, or context for teammates. Private notes are visible only to you and admins.
+            </p>
+          </div>
+        </div>
+
+        {noteMessage && (
+          <div
+            className={`rounded-md border px-3 py-2 text-sm ${
+              noteMessage.type === 'success'
+                ? 'border-green-200 bg-green-50 text-green-700'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            {noteMessage.text}
+          </div>
+        )}
+
+        <form onSubmit={handleNoteSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="note-content">Add a note</Label>
+            <Textarea
+              id="note-content"
+              value={noteContent}
+              onChange={(event) => {
+                setNoteContent(event.target.value);
+                if (noteMessage) setNoteMessage(null);
+              }}
+              placeholder="Share updates, coaching ideas, or candidate feedback..."
+              minLength={3}
+              required
+            />
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-between">
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
+                checked={noteIsPrivate}
+                onChange={(event) => {
+                  setNoteIsPrivate(event.target.checked);
+                  if (noteMessage) setNoteMessage(null);
+                }}
+              />
+              <span className="flex items-center gap-1">
+                <Lock className="h-4 w-4" />
+                Private to me
+              </span>
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
+                checked={noteFollowUpEnabled}
+                onChange={(event) => {
+                  setNoteFollowUpEnabled(event.target.checked);
+                  if (noteMessage) setNoteMessage(null);
+                }}
+              />
+              <span className="flex items-center gap-1">
+                <Bell className="h-4 w-4" />
+                Create follow-up reminder
+              </span>
+            </label>
+          </div>
+
+          {noteFollowUpEnabled && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-lg border border-border bg-muted/30 p-4">
+              <div className="space-y-2">
+                <Label htmlFor="follow-up-due">Due date</Label>
+                <Input
+                  id="follow-up-due"
+                  type="datetime-local"
+                  value={noteFollowUpDueDate}
+                  onChange={(event) => {
+                    setNoteFollowUpDueDate(event.target.value);
+                    if (noteMessage) setNoteMessage(null);
+                  }}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="follow-up-priority">Priority</Label>
+                <select
+                  id="follow-up-priority"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  value={noteFollowUpPriority}
+                  onChange={(event) => {
+                    setNoteFollowUpPriority(parseInt(event.target.value, 10) || 1);
+                    if (noteMessage) setNoteMessage(null);
+                  }}
+                >
+                  {[1, 2, 3, 4, 5].map((priority) => (
+                    <option key={priority} value={priority}>
+                      Priority {priority}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="follow-up-title">Reminder title (optional)</Label>
+                <Input
+                  id="follow-up-title"
+                  value={noteFollowUpTitle}
+                  onChange={(event) => {
+                    setNoteFollowUpTitle(event.target.value);
+                    if (noteMessage) setNoteMessage(null);
+                  }}
+                  placeholder="Follow up with candidate"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="follow-up-description">Reminder description (optional)</Label>
+                <Textarea
+                  id="follow-up-description"
+                  value={noteFollowUpDescription}
+                  onChange={(event) => {
+                    setNoteFollowUpDescription(event.target.value);
+                    if (noteMessage) setNoteMessage(null);
+                  }}
+                  placeholder="Add context for the reminder..."
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => {
+              setNoteContent('');
+              setNoteIsPrivate(false);
+              setNoteFollowUpEnabled(false);
+              setNoteFollowUpDueDate('');
+              setNoteFollowUpTitle('');
+              setNoteFollowUpDescription('');
+              setNoteFollowUpPriority(1);
+              setNoteMessage(null);
+            }}>
+              Clear
+            </Button>
+            <Button type="submit" disabled={createNote.isPending}>
+              {createNote.isPending ? 'Saving...' : 'Add Note'}
+            </Button>
+          </div>
+        </form>
+
+        <div className="space-y-4">
+          {notesLoading ? (
+            <div className="text-sm text-muted-foreground">Loading notes...</div>
+          ) : notes.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              No notes yet. Start capturing updates to keep everyone aligned.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {notes.map((note) => (
+                <NoteItem key={note.id} note={note} formatDateTime={formatDateTime} />
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
     </DashboardLayout>
   );
 };
@@ -249,4 +499,44 @@ const StatBadge = ({ label, value, suffix = '', tone }) => (
   </div>
 );
 
+const NoteItem = ({ note, formatDateTime }) => (
+  <div className="rounded-lg border border-border bg-card/60 p-4 shadow-sm">
+    <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center gap-3">
+        <div className="rounded-full bg-secondary/70 p-2">
+          <MessageSquare className="h-4 w-4 text-primary" />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            {note.author?.name || 'Unknown contributor'}
+            {note.isPrivate && (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <Lock className="h-3 w-3" />
+                Private
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {formatDateTime(note.createdAt)} - {note.author?.role ?? 'Contributor'}
+          </p>
+        </div>
+      </div>
+    </div>
+    <p className="mt-3 text-sm leading-relaxed text-foreground">{note.content}</p>
+
+    {note.reminder && (
+      <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 border border-amber-200 flex items-start gap-2">
+        <Bell className="h-3.5 w-3.5 mt-0.5" />
+        <div className="space-y-0.5">
+          <p className="font-semibold">{note.reminder.title}</p>
+          <p>{note.reminder.description}</p>
+          <p className="text-amber-700/80">
+            Due {formatDateTime(note.reminder.dueDate)} - Priority {note.reminder.priority}
+          </p>
+        </div>
+      </div>
+    )}
+  </div>
+);
 export default CandidateDetailPage;
+

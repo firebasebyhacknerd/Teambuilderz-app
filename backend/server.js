@@ -182,6 +182,7 @@ async function setupDatabase() {
         CREATE TABLE reminders (
           id SERIAL PRIMARY KEY,
           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL,
           title VARCHAR(200) NOT NULL,
           description TEXT,
           due_date TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -190,6 +191,11 @@ async function setupDatabase() {
           created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
+      `);
+
+      await pool.query(`
+        ALTER TABLE reminders
+        ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL
       `);
 
       // Alerts table
@@ -319,6 +325,42 @@ const verifyToken = (req, res, next) => {
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });
   }
+  };
+
+const requireRole =
+  (...allowedRoles) =>
+  (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+    return next();
+  };
+
+const fetchCandidateWithAccess = async (candidateId, user) => {
+  const candidateResult = await pool.query(
+    `
+      SELECT id, assigned_recruiter_id, name
+      FROM candidates
+      WHERE id = $1
+    `,
+    [candidateId]
+  );
+
+  if (candidateResult.rows.length === 0) {
+    const error = new Error('Candidate not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const candidate = candidateResult.rows[0];
+
+  if (user.role === 'Recruiter' && candidate.assigned_recruiter_id !== user.userId) {
+    const error = new Error('Access denied');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return candidate;
 };
 
 // Authentication Route
@@ -598,6 +640,178 @@ app.delete('/api/v1/candidates/:id', verifyToken, async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+app.get('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
+  try {
+    const candidateId = parseInt(req.params.id, 10);
+    if (Number.isNaN(candidateId)) {
+      return res.status(400).json({ message: 'Invalid candidate id' });
+    }
+
+    await fetchCandidateWithAccess(candidateId, req.user);
+
+    const params = [candidateId];
+    let visibilityClause = '';
+
+    if (req.user.role === 'Recruiter') {
+      params.push(req.user.userId);
+      visibilityClause = ' AND (n.is_private = false OR n.author_id = $2)';
+    }
+
+    const notesResult = await pool.query(
+      `
+        SELECT
+          n.id,
+          n.candidate_id,
+          n.author_id,
+          u.name AS author_name,
+          u.role AS author_role,
+          n.content,
+          n.is_private,
+          n.created_at,
+          r.id AS reminder_id,
+          r.title AS reminder_title,
+          r.description AS reminder_description,
+          r.due_date AS reminder_due_date,
+          r.status AS reminder_status,
+          r.priority AS reminder_priority
+        FROM notes n
+        JOIN users u ON n.author_id = u.id
+        LEFT JOIN reminders r ON r.note_id = n.id
+        WHERE n.candidate_id = $1
+        ${visibilityClause}
+        ORDER BY n.created_at DESC
+      `,
+      params
+    );
+
+    const notes = notesResult.rows.map((row) => ({
+      id: row.id,
+      candidateId: row.candidate_id,
+      content: row.content,
+      isPrivate: row.is_private,
+      createdAt: row.created_at,
+      author: {
+        id: row.author_id,
+        name: row.author_name,
+        role: row.author_role,
+      },
+      reminder: row.reminder_id
+        ? {
+            id: row.reminder_id,
+            title: row.reminder_title,
+            description: row.reminder_description,
+            dueDate: row.reminder_due_date,
+            status: row.reminder_status,
+            priority: row.reminder_priority,
+          }
+        : null,
+    }));
+
+    res.json(notes);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error fetching notes:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
+  try {
+    const candidateId = parseInt(req.params.id, 10);
+    if (Number.isNaN(candidateId)) {
+      return res.status(400).json({ message: 'Invalid candidate id' });
+    }
+
+    const candidate = await fetchCandidateWithAccess(candidateId, req.user);
+
+    const { content, isPrivate = false, followUp } = req.body;
+    const trimmedContent = (content || '').trim();
+    if (!trimmedContent) {
+      return res.status(400).json({ message: 'Note content is required.' });
+    }
+
+    const authorResult = await pool.query(
+      `
+        SELECT name, role
+        FROM users
+        WHERE id = $1
+      `,
+      [req.user.userId]
+    );
+    const authorDetails = authorResult.rows[0] || { name: 'Unknown', role: req.user.role };
+
+    const noteResult = await pool.query(
+      `
+        INSERT INTO notes (candidate_id, author_id, content, is_private)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, candidate_id, author_id, content, is_private, created_at
+      `,
+      [candidateId, req.user.userId, trimmedContent, Boolean(isPrivate)]
+    );
+
+    const note = noteResult.rows[0];
+
+    let reminder = null;
+    if (followUp?.dueDate) {
+      const dueDate = new Date(followUp.dueDate);
+      if (Number.isNaN(dueDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid follow-up due date.' });
+      }
+
+      const reminderUserId =
+        followUp.assigneeId || candidate.assigned_recruiter_id || req.user.userId;
+      const reminderTitle =
+        (followUp.title || `Follow up with ${candidate.name}`).trim() || `Follow up with ${candidate.name}`;
+      const reminderDescription = (followUp.description || trimmedContent).trim();
+      const reminderPriority = Number.isFinite(followUp.priority)
+        ? Math.max(1, Math.min(5, Math.floor(followUp.priority)))
+        : 1;
+
+      const reminderResult = await pool.query(
+        `
+          INSERT INTO reminders (user_id, note_id, title, description, due_date, priority)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING id, title, description, due_date, status, priority
+        `,
+        [reminderUserId, note.id, reminderTitle, reminderDescription, dueDate.toISOString(), reminderPriority]
+      );
+
+      const reminderRow = reminderResult.rows[0];
+      reminder = {
+        id: reminderRow.id,
+        title: reminderRow.title,
+        description: reminderRow.description,
+        dueDate: reminderRow.due_date,
+        status: reminderRow.status,
+        priority: reminderRow.priority,
+      };
+    }
+
+    res.status(201).json({
+      id: note.id,
+      candidateId: note.candidate_id,
+      content: note.content,
+      isPrivate: note.is_private,
+      createdAt: note.created_at,
+      author: {
+        id: req.user.userId,
+        name: authorDetails.name,
+        role: authorDetails.role || req.user.role,
+      },
+      reminder,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error creating note:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 
 // Applications API endpoints
 app.get('/api/v1/applications', verifyToken, async (req, res) => {
@@ -964,7 +1178,7 @@ app.get('/api/v1/reports/performance', verifyToken, async (req, res) => {
     const startDate = date_from || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     const endDate = date_to || new Date().toISOString().split('T')[0];
 
-    const result = await pool.query(`
+    let query = `
       SELECT 
         u.id as recruiter_id,
         u.name as recruiter_name,
@@ -979,13 +1193,152 @@ app.get('/api/v1/reports/performance', verifyToken, async (req, res) => {
       LEFT JOIN daily_activity da ON u.id = da.user_id 
         AND da.activity_date BETWEEN $1 AND $2
       WHERE u.role = 'Recruiter' AND u.is_active = true
-      GROUP BY u.id, u.name, u.daily_quota
-      ORDER BY apps_total_period DESC
-    `, [startDate, endDate]);
+    `;
+    const params = [startDate, endDate];
 
-    res.json(result.rows);
+    if (req.user.role !== 'Admin') {
+      query += ' AND u.id = $3';
+      params.push(req.user.userId);
+    }
+
+    query += ' GROUP BY u.id, u.name, u.daily_quota ORDER BY apps_total_period DESC';
+
+    const result = await pool.query(query, params);
+
+    res.json(
+      req.user.role === 'Admin'
+        ? result.rows
+        : result.rows.map((row) => ({ ...row, scope: 'self' })),
+    );
   } catch (error) {
     console.error('Error fetching performance data:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const [{ rows: candidateSummaryRows }, { rows: stageRows }, { rows: marketingRows }, { rows: productivityRows }] =
+      await Promise.all([
+        pool.query(`
+          SELECT
+            COUNT(*)::int AS total_candidates,
+            COUNT(*) FILTER (WHERE current_stage <> 'inactive')::int AS active_candidates,
+            COUNT(*) FILTER (WHERE marketing_start_date IS NOT NULL)::int AS marketing_candidates,
+            COALESCE(AVG(EXTRACT(DAY FROM CURRENT_DATE - created_at)), 0)::numeric(10,2) AS avg_tenure_days
+          FROM candidates
+        `),
+        pool.query(`
+          SELECT current_stage, COUNT(*)::int AS count
+          FROM candidates
+          GROUP BY current_stage
+        `),
+        pool.query(`
+          SELECT
+            COALESCE(AVG(app_totals.total_apps), 0)::numeric(10,2) AS avg_apps_per_candidate,
+            COALESCE(AVG(app_totals.days_since_last_app), 0)::numeric(10,2) AS avg_days_since_last_application
+          FROM (
+            SELECT
+              c.id,
+              COALESCE(SUM(a.applications_count), 0) AS total_apps,
+              CASE
+                WHEN MAX(a.application_date) IS NULL THEN NULL
+                ELSE EXTRACT(DAY FROM CURRENT_DATE - MAX(a.application_date))
+              END AS days_since_last_app
+            FROM candidates c
+            LEFT JOIN applications a ON a.candidate_id = c.id
+            GROUP BY c.id
+          ) app_totals
+        `),
+        pool.query(`
+          SELECT
+            u.id,
+            u.name,
+            u.daily_quota,
+            COALESCE(today.applications_count, 0) AS applications_today,
+            COALESCE(today.interviews_count, 0) AS interviews_today,
+            COALESCE(today.assessments_count, 0) AS assessments_today,
+            COALESCE(last7.avg_apps, 0)::numeric(10,2) AS avg_apps_last_7,
+            COALESCE(last30.avg_apps, 0)::numeric(10,2) AS avg_apps_last_30
+          FROM users u
+          LEFT JOIN (
+            SELECT user_id, applications_count, interviews_count, assessments_count
+            FROM daily_activity
+            WHERE activity_date = CURRENT_DATE
+          ) today ON today.user_id = u.id
+          LEFT JOIN (
+            SELECT user_id, AVG(applications_count) AS avg_apps
+            FROM daily_activity
+            WHERE activity_date >= CURRENT_DATE - INTERVAL '6 days'
+            GROUP BY user_id
+          ) last7 ON last7.user_id = u.id
+          LEFT JOIN (
+            SELECT user_id, AVG(applications_count) AS avg_apps
+            FROM daily_activity
+            WHERE activity_date >= CURRENT_DATE - INTERVAL '29 days'
+            GROUP BY user_id
+          ) last30 ON last30.user_id = u.id
+          WHERE u.role = 'Recruiter' AND u.is_active = true
+          ORDER BY u.name
+        `),
+      ]);
+
+    const candidateSummary = candidateSummaryRows[0] || {
+      total_candidates: 0,
+      active_candidates: 0,
+      marketing_candidates: 0,
+      avg_tenure_days: 0,
+    };
+
+    const totalApplicationsToday = productivityRows.reduce(
+      (sum, row) => sum + Number(row.applications_today || 0),
+      0,
+    );
+    const totalInterviewsToday = productivityRows.reduce(
+      (sum, row) => sum + Number(row.interviews_today || 0),
+      0,
+    );
+    const totalAssessmentsToday = productivityRows.reduce(
+      (sum, row) => sum + Number(row.assessments_today || 0),
+      0,
+    );
+
+    res.json({
+      summary: {
+        totalCandidates: Number(candidateSummary.total_candidates) || 0,
+        activeCandidates: Number(candidateSummary.active_candidates) || 0,
+        marketingCandidates: Number(candidateSummary.marketing_candidates) || 0,
+        avgCandidateTenureDays: Number(candidateSummary.avg_tenure_days) || 0,
+        totalRecruiters: productivityRows.length,
+        totalApplicationsToday,
+        totalInterviewsToday,
+        totalAssessmentsToday,
+      },
+      candidateStages: stageRows.map((row) => ({
+        stage: row.current_stage,
+        count: Number(row.count) || 0,
+      })),
+      marketingVelocity: {
+        avgApplicationsPerCandidate: Number(marketingRows[0]?.avg_apps_per_candidate || 0),
+        avgDaysSinceLastApplication: Number(marketingRows[0]?.avg_days_since_last_application || 0),
+      },
+      recruiterProductivity: productivityRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        dailyQuota: Number(row.daily_quota) || 0,
+        applicationsToday: Number(row.applications_today) || 0,
+        interviewsToday: Number(row.interviews_today) || 0,
+        assessmentsToday: Number(row.assessments_today) || 0,
+        avgApplicationsLast7Days: Number(row.avg_apps_last_7) || 0,
+        avgApplicationsLast30Days: Number(row.avg_apps_last_30) || 0,
+        quotaProgress:
+          row.daily_quota && Number(row.daily_quota) > 0
+            ? Number(row.applications_today || 0) / Number(row.daily_quota)
+            : 0,
+      })),
+    });
+  } catch (error) {
+    console.error('Error building overview report:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1079,12 +1432,8 @@ app.patch('/api/v1/alerts/:id/resolve', verifyToken, async (req, res) => {
 });
 
 // User management endpoints
-app.get('/api/v1/users', verifyToken, async (req, res) => {
+app.get('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'Admin') {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
     const result = await pool.query(`
       SELECT id, name, email, role, daily_quota, is_active, created_at
       FROM users
@@ -1098,12 +1447,8 @@ app.get('/api/v1/users', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/users', verifyToken, async (req, res) => {
+app.post('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
-    if (req.user.role !== 'Admin') {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-
     const { name, email, password, role, daily_quota } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -1267,6 +1612,8 @@ async function startServer() {
     console.log('    GET  /api/v1/candidates - Get candidates (requires auth)');
     console.log('    POST /api/v1/candidates - Create candidate (requires auth)');
     console.log('    PUT  /api/v1/candidates/:id - Update candidate (requires auth)');
+    console.log('    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)');
+    console.log('    POST /api/v1/candidates/:id/notes - Create note (requires auth)');
     console.log('  Applications:');
     console.log('    GET  /api/v1/applications - Get applications (requires auth)');
     console.log('    POST /api/v1/applications - Create application (requires auth)');
@@ -1278,6 +1625,7 @@ async function startServer() {
     console.log('    POST /api/v1/assessments - Create assessment (requires auth)');
     console.log('  Reports:');
     console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
+    console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
     console.log('  Alerts:');
     console.log('    GET  /api/v1/alerts - Get alerts (requires auth)');
     console.log('  Users (Admin only):');
