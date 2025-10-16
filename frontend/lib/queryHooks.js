@@ -29,6 +29,9 @@ export const queryKeys = {
   candidates: (token) => ['candidates', token],
   reports: (token, scope) => ['reports', scope, token],
   candidateNotes: (token, candidateId) => ['candidate-notes', token, candidateId],
+  adminOverview: (token) => ['admin-overview', token],
+  adminActivity: (token) => ['admin-activity', token],
+  notifications: (token) => ['notifications', token],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -163,3 +166,43 @@ export const useCreateCandidateNoteMutation = (token, candidateId, options = {})
     ...options,
   });
 };
+
+export const useAdminOverviewQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.adminOverview(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/reports/overview`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load overview metrics.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: null,
+  });
+
+export const useAdminActivityQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.adminActivity(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/reports/activity`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load recent activity.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: { recentNotes: [], upcomingReminders: [] },
+  });
+
+export const useNotificationsQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.notifications(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/notifications`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load notifications.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: { reminders: [], alerts: [] },
+    refetchInterval: 15000,
+  });

@@ -1343,6 +1343,184 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
   }
 });
 
+app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const [notesResult, remindersResult] = await Promise.all([
+      pool.query(
+        `
+          SELECT
+            n.id,
+            n.candidate_id,
+            COALESCE(c.name, 'Unassigned') AS candidate_name,
+            n.content,
+            n.is_private,
+            n.created_at,
+            u.id AS author_id,
+            u.name AS author_name,
+            u.role AS author_role
+          FROM notes n
+          JOIN users u ON n.author_id = u.id
+          LEFT JOIN candidates c ON n.candidate_id = c.id
+          ORDER BY n.created_at DESC
+          LIMIT 15
+        `
+      ),
+      pool.query(
+        `
+          SELECT
+            r.id,
+            r.title,
+            r.description,
+            r.due_date,
+            r.status,
+            r.priority,
+            r.user_id,
+            u.name AS user_name,
+            c.id AS candidate_id,
+            c.name AS candidate_name
+          FROM reminders r
+          LEFT JOIN users u ON r.user_id = u.id
+          LEFT JOIN notes n ON r.note_id = n.id
+          LEFT JOIN candidates c ON n.candidate_id = c.id
+          WHERE r.status IN ('pending', 'snoozed')
+          ORDER BY r.due_date ASC
+          LIMIT 15
+        `
+      ),
+    ]);
+
+    const recentNotes = notesResult.rows.map((row) => ({
+      id: row.id,
+      candidateId: row.candidate_id,
+      candidateName: row.candidate_name,
+      content: row.content,
+      isPrivate: row.is_private,
+      createdAt: row.created_at,
+      author: {
+        id: row.author_id,
+        name: row.author_name,
+        role: row.author_role,
+      },
+    }));
+
+    const upcomingReminders = remindersResult.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      dueDate: row.due_date,
+      status: row.status,
+      priority: row.priority,
+      owner: {
+        id: row.user_id,
+        name: row.user_name,
+      },
+      candidate: row.candidate_id
+        ? {
+            id: row.candidate_id,
+            name: row.candidate_name,
+          }
+        : null,
+    }));
+
+    res.json({ recentNotes, upcomingReminders });
+  } catch (error) {
+    console.error('Error fetching activity feed:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.get('/api/v1/notifications', verifyToken, async (req, res) => {
+  try {
+    const isAdmin = req.user.role === 'Admin';
+
+    const remindersQuery = `
+      SELECT
+        r.id,
+        r.title,
+        r.description,
+        r.due_date,
+        r.status,
+        r.priority,
+        r.user_id,
+        u.name AS user_name,
+        c.id AS candidate_id,
+        c.name AS candidate_name
+      FROM reminders r
+      LEFT JOIN users u ON r.user_id = u.id
+      LEFT JOIN notes n ON r.note_id = n.id
+      LEFT JOIN candidates c ON n.candidate_id = c.id
+      WHERE r.status IN ('pending', 'snoozed')
+      ${isAdmin ? '' : 'AND r.user_id = $1'}
+      ORDER BY r.due_date ASC
+      LIMIT 15
+    `;
+
+    const alertsQuery = `
+      SELECT
+        a.id,
+        a.alert_type,
+        a.title,
+        a.message,
+        a.status,
+        a.priority,
+        a.created_at,
+        a.user_id,
+        u.name AS user_name
+      FROM alerts a
+      LEFT JOIN users u ON a.user_id = u.id
+      WHERE a.status <> 'resolved'
+      ${isAdmin ? '' : 'AND a.user_id = $1'}
+      ORDER BY a.priority DESC, a.created_at DESC
+      LIMIT 20
+    `;
+
+    const params = isAdmin ? [] : [req.user.userId];
+
+    const [remindersResult, alertsResult] = await Promise.all([
+      pool.query(remindersQuery, params),
+      pool.query(alertsQuery, params),
+    ]);
+
+    const reminders = remindersResult.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      dueDate: row.due_date,
+      status: row.status,
+      priority: row.priority,
+      owner: {
+        id: row.user_id,
+        name: row.user_name,
+      },
+      candidate: row.candidate_id
+        ? {
+            id: row.candidate_id,
+            name: row.candidate_name,
+          }
+        : null,
+    }));
+
+    const alerts = alertsResult.rows.map((row) => ({
+      id: row.id,
+      type: row.alert_type,
+      title: row.title,
+      message: row.message,
+      status: row.status,
+      priority: row.priority,
+      createdAt: row.created_at,
+      owner: {
+        id: row.user_id,
+        name: row.user_name,
+      },
+    }));
+
+    res.json({ reminders, alerts });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Alerts API endpoints
 app.get('/api/v1/alerts', verifyToken, async (req, res) => {
   try {
@@ -1626,6 +1804,9 @@ async function startServer() {
     console.log('  Reports:');
     console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
     console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
+    console.log('    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)');
+    console.log('  Notifications:');
+    console.log('    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)');
     console.log('  Alerts:');
     console.log('    GET  /api/v1/alerts - Get alerts (requires auth)');
     console.log('  Users (Admin only):');
