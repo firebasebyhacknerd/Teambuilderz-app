@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { FileText, Filter, Home, LogOut, Users, AlertTriangle } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
-import API_URL from '../../lib/api';
+import {
+  useApplicationsQuery,
+  useCandidatesQuery,
+  useLogApplicationMutation,
+} from '../../lib/queryHooks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 const INTERVIEW_TYPES = ['phone', 'video', 'in_person', 'technical', 'hr', 'final'];
@@ -13,15 +17,10 @@ const INTERVIEW_TYPES = ['phone', 'video', 'in_person', 'technical', 'hr', 'fina
 const ApplicationsPage = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
-  const [applications, setApplications] = useState([]);
-  const [filtered, setFiltered] = useState([]);
-  const [candidates, setCandidates] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('Recruiter');
   const [userRole, setUserRole] = useState('Recruiter');
-  const [formSubmitting, setFormSubmitting] = useState(false);
   const [formMessage, setFormMessage] = useState(null);
   const [includeInterview, setIncludeInterview] = useState(false);
   const [includeAssessment, setIncludeAssessment] = useState(false);
@@ -52,70 +51,6 @@ const ApplicationsPage = () => {
     notes: '',
   });
 
-  const loadApplications = useCallback(
-    async (authToken) => {
-      setLoading(true);
-      try {
-        const response = await fetch(`${API_URL}/api/v1/applications`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-
-        if (response.status === 401 || response.status === 403) {
-          router.push('/login');
-          return;
-        }
-
-        if (!response.ok) {
-          console.error(`Failed to load applications (status ${response.status})`);
-          setApplications([]);
-          setFiltered([]);
-          return;
-        }
-
-        const payload = await response.json().catch(() => []);
-        const rows = Array.isArray(payload) ? payload : [];
-        setApplications(rows);
-        setFiltered(rows);
-      } catch (error) {
-        console.error('Applications fetch failed:', error.message);
-        setApplications([]);
-        setFiltered([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [router]
-  );
-
-  const loadCandidates = useCallback(
-    async (authToken) => {
-      try {
-        const response = await fetch(`${API_URL}/api/v1/candidates`, {
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-
-        if (response.status === 401 || response.status === 403) {
-          router.push('/login');
-          return;
-        }
-
-        if (!response.ok) {
-          console.error(`Failed to load candidates (status ${response.status})`);
-          setCandidates([]);
-          return;
-        }
-
-        const payload = await response.json().catch(() => []);
-        const rows = Array.isArray(payload) ? payload : [];
-        setCandidates(rows);
-      } catch (error) {
-        console.error('Candidates fetch failed:', error.message);
-        setCandidates([]);
-      }
-    },
-    [router]
-  );
-
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
     if (!storedToken) {
@@ -128,31 +63,44 @@ const ApplicationsPage = () => {
     const storedName = localStorage.getItem('userName');
     setUserRole(storedRole);
     if (storedName) setUserName(storedName);
+  }, [router]);
 
-    const bootstrap = async () => {
-      await Promise.all([loadApplications(storedToken), loadCandidates(storedToken)]);
-    };
+  const {
+    data: applications = [],
+    isLoading: applicationsLoading,
+    isRefetching: applicationsRefetching,
+  } = useApplicationsQuery(token);
 
-    bootstrap();
-  }, [loadApplications, loadCandidates, router]);
+  const {
+    data: candidates = [],
+    isLoading: candidatesLoading,
+  } = useCandidatesQuery(token);
 
-  useEffect(() => {
+  const logApplication = useLogApplicationMutation(token, {
+    onSuccess: () => {
+      setFormMessage({ type: 'success', text: 'Application logged successfully.' });
+      resetForm();
+    },
+    onError: (error) => {
+      setFormMessage({ type: 'error', text: error.message || 'Unable to log application.' });
+    },
+  });
+  const filteredApplications = useMemo(() => {
     const lowered = searchTerm.trim().toLowerCase();
-    const nextFiltered = applications.filter((app) => {
-      const matchesSearch =
+
+    return applications.filter((app) => {
+      const textMatches =
         !lowered ||
         [app.candidate_name, app.company_name, app.job_title, app.channel, app.status]
           .filter(Boolean)
           .some((field) => field.toLowerCase().includes(lowered));
 
-      const matchesStatus = !statusFilter || app.status === statusFilter;
-      return matchesSearch && matchesStatus;
+      const statusMatches = !statusFilter || app.status === statusFilter;
+      return textMatches && statusMatches;
     });
-
-    setFiltered(nextFiltered);
   }, [applications, searchTerm, statusFilter]);
 
-  const totalApplications = filtered.reduce(
+  const totalApplications = filteredApplications.reduce(
     (sum, app) => sum + (Number(app.applications_count) || 0),
     0
   );
@@ -220,9 +168,9 @@ const ApplicationsPage = () => {
     });
   };
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = (event) => {
     event.preventDefault();
-    if (!token) return;
+    if (!token || logApplication.isPending) return;
 
     setFormMessage(null);
 
@@ -249,94 +197,45 @@ const ApplicationsPage = () => {
       return;
     }
 
-    setFormSubmitting(true);
+    const applicationPayload = {
+      candidate_id: Number(formValues.candidateId),
+      company_name: trimmedCompany,
+      job_title: trimmedJobTitle,
+      job_description: formValues.jobDescription.trim() || undefined,
+      channel: formValues.channel.trim() || undefined,
+      status: formValues.status || 'sent',
+      applications_count: Math.max(Number(formValues.applicationsCount) || 1, 1),
+      application_date: formValues.applicationDate || undefined,
+    };
 
-    try {
-      const applicationPayload = {
-        candidate_id: Number(formValues.candidateId),
-        company_name: trimmedCompany,
-        job_title: trimmedJobTitle,
-        job_description: formValues.jobDescription.trim() || undefined,
-        channel: formValues.channel.trim() || undefined,
-        status: formValues.status || 'sent',
-        applications_count: Math.max(Number(formValues.applicationsCount) || 1, 1),
-        application_date: formValues.applicationDate || undefined,
-      };
+    const interviewPayload =
+      includeInterview
+        ? {
+            company_name: (interviewDetails.companyName || trimmedCompany).trim(),
+            interview_type: interviewDetails.interviewType,
+            round_number: Math.max(Number(interviewDetails.roundNumber) || 1, 1),
+            scheduled_date: new Date(interviewDetails.scheduledDate).toISOString(),
+            timezone: interviewDetails.timezone || 'UTC',
+          }
+        : null;
 
-      const applicationResponse = await fetch(`${API_URL}/api/v1/applications`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(applicationPayload),
-      });
+    const assessmentPayload =
+      includeAssessment
+        ? {
+            assessment_platform: assessmentDetails.assessmentPlatform.trim(),
+            assessment_type: assessmentDetails.assessmentType.trim() || undefined,
+            due_date: assessmentDetails.dueDate,
+            notes: assessmentDetails.notes.trim() || undefined,
+          }
+        : null;
 
-      if (!applicationResponse.ok) {
-        throw new Error(`Failed to log application (status ${applicationResponse.status}).`);
-      }
-
-      const createdApplication = await applicationResponse.json();
-
-      if (includeInterview) {
-        const scheduledIso = new Date(interviewDetails.scheduledDate).toISOString();
-        const interviewPayload = {
-          candidate_id: Number(formValues.candidateId),
-          application_id: createdApplication.id,
-          company_name: (interviewDetails.companyName || trimmedCompany).trim(),
-          interview_type: interviewDetails.interviewType,
-          round_number: Math.max(Number(interviewDetails.roundNumber) || 1, 1),
-          scheduled_date: scheduledIso,
-          timezone: interviewDetails.timezone || 'UTC',
-        };
-
-        const interviewResponse = await fetch(`${API_URL}/api/v1/interviews`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(interviewPayload),
-        });
-
-        if (!interviewResponse.ok) {
-          throw new Error(`Application saved but interview logging failed (status ${interviewResponse.status}).`);
-        }
-      }
-
-      if (includeAssessment) {
-        const assessmentPayload = {
-          candidate_id: Number(formValues.candidateId),
-          application_id: createdApplication.id,
-          assessment_platform: assessmentDetails.assessmentPlatform.trim(),
-          assessment_type: assessmentDetails.assessmentType.trim() || undefined,
-          due_date: assessmentDetails.dueDate,
-          notes: assessmentDetails.notes.trim() || undefined,
-        };
-
-        const assessmentResponse = await fetch(`${API_URL}/api/v1/assessments`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(assessmentPayload),
-        });
-
-        if (!assessmentResponse.ok) {
-          throw new Error(`Application saved but assessment logging failed (status ${assessmentResponse.status}).`);
-        }
-      }
-
-      setFormMessage({ type: 'success', text: 'Application logged successfully.' });
-      resetForm();
-      await loadApplications(token);
-    } catch (error) {
-      console.error('Application submission failed:', error);
-      setFormMessage({ type: 'error', text: error.message || 'Unable to log application.' });
-    } finally {
-      setFormSubmitting(false);
-    }
+    logApplication.mutate({
+      application: applicationPayload,
+      includeInterview,
+      includeAssessment,
+      interview: interviewPayload,
+      assessment: assessmentPayload,
+    });
   };
 
   return (
@@ -588,11 +487,16 @@ const ApplicationsPage = () => {
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={resetForm} disabled={formSubmitting}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={resetForm}
+                disabled={logApplication.isPending}
+              >
                 Reset
               </Button>
-              <Button type="submit" disabled={formSubmitting}>
-                {formSubmitting ? 'Logging...' : 'Log Application'}
+              <Button type="submit" disabled={logApplication.isPending}>
+                {logApplication.isPending ? 'Logging...' : 'Log Application'}
               </Button>
             </div>
           </form>
@@ -629,16 +533,16 @@ const ApplicationsPage = () => {
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <SummaryCard label="Filtered Applications" value={filtered.length} />
+            <SummaryCard label="Filtered Applications" value={filteredApplications.length} />
             <SummaryCard label="Total Count (Filtered)" value={totalApplications} />
             <SummaryCard label="Active Filters" value={statusFilter ? 1 : 0} />
           </div>
         </Card>
 
         <Card className="overflow-hidden">
-          {loading ? (
+          {applicationsLoading || candidatesLoading || applicationsRefetching ? (
             <div className="p-6 text-center text-muted-foreground">Loading applications...</div>
-          ) : filtered.length === 0 ? (
+          ) : filteredApplications.length === 0 ? (
             <div className="p-8 text-center text-muted-foreground">
               No applications found. Adjust filters or add a new submission.
             </div>
@@ -657,7 +561,7 @@ const ApplicationsPage = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((application) => (
+                  {filteredApplications.map((application) => (
                     <tr
                       key={application.id}
                       className="border-b border-border hover:bg-accent/60 transition cursor-pointer"
