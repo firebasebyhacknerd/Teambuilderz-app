@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
@@ -111,6 +111,7 @@ const AdminDashboard = () => {
     { href: '/admin', label: 'Dashboard', icon: Home },
     { href: '/admin/candidates', label: 'Candidates', icon: Users },
     { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
+    { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
   ];
@@ -404,10 +405,10 @@ const RecruiterListItem = ({ recruiter }) => {
       </div>
       <div className="flex flex-col items-end gap-1">
         <span className={`text-sm font-medium ${quota && applicationsToday < quota ? 'text-red-600' : 'text-emerald-600'}`}>
-          {applicationsToday} / {quota || '—'} Apps today
+          {applicationsToday} / {quota || 'â€”'} Apps today
         </span>
         <span className="text-xs text-muted-foreground">
-          7-day avg {avgPerDay7.toFixed(1)} • 30-day avg {avgPerDay30.toFixed(1)}
+          7-day avg {avgPerDay7.toFixed(1)} â€¢ 30-day avg {avgPerDay30.toFixed(1)}
         </span>
         {quota > 0 && (
           <span className={`text-xs font-medium ${shortfall < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
@@ -503,7 +504,7 @@ const ActivityNoteItem = ({ note }) => (
           {note.isPrivate && <span className="ml-2 text-xs text-muted-foreground">(Private)</span>}
         </p>
         <p className="text-xs text-muted-foreground">
-          {note.candidateName} • {dateTimeFormatter.format(new Date(note.createdAt))}
+          {note.candidateName} â€¢ {dateTimeFormatter.format(new Date(note.createdAt))}
         </p>
       </div>
     </div>
@@ -523,7 +524,7 @@ const ReminderItem = ({ reminder }) => (
     <div className="flex items-center justify-between text-amber-700/70">
       <span>
         Owner: {reminder.owner?.name ?? 'Unassigned'}
-        {reminder.candidate?.name ? ` • ${reminder.candidate.name}` : ''}
+        {reminder.candidate?.name ? ` â€¢ ${reminder.candidate.name}` : ''}
       </span>
       <span>Priority {reminder.priority}</span>
     </div>
@@ -541,7 +542,7 @@ const NotificationReminder = ({ reminder }) => (
     {reminder.description && <p className="text-xs text-muted-foreground mt-1">{reminder.description}</p>}
     <p className="text-xs text-muted-foreground mt-1">
       {reminder.owner?.name ?? 'Unassigned'}
-      {reminder.candidate?.name ? ` • ${reminder.candidate.name}` : ''}
+      {reminder.candidate?.name ? ` â€¢ ${reminder.candidate.name}` : ''}
     </p>
   </div>
 );
@@ -554,9 +555,12 @@ const NotificationAlert = ({ alert }) => (
     </div>
     <p className="text-xs text-muted-foreground mt-1">{alert.message}</p>
     <p className="text-xs text-muted-foreground mt-1">
-      Owner: {alert.owner?.name ?? 'Unassigned'} • Priority {alert.priority}
+      Owner: {alert.owner?.name ?? 'Unassigned'} â€¢ Priority {alert.priority}
     </p>
   </div>
 );
 
 export default AdminDashboard;
+
+
+

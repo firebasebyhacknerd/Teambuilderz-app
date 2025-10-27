@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { FileText, Filter, Home, LogOut, Users, AlertTriangle } from 'lucide-react';
+import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -98,6 +98,7 @@ const ApplicationsPage = () => {
       return [
         { href: '/admin', label: 'Dashboard', icon: Home },
         { href: '/admin/candidates', label: 'Candidates', icon: Users },
+        { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
         { href: '/recruiter/applications', label: 'Applications', icon: FileText },
         { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
       ];
@@ -201,7 +202,7 @@ const ApplicationsPage = () => {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Log New Application</h2>
             <p className="text-sm text-muted-foreground">
-              Log today&apos;s outreach volume. Target is 60 applications—add a quick note if you logged fewer.
+              Log today&apos;s outreach volume. Target is 60 applicationsâ€”add a quick note if you logged fewer.
             </p>
           </div>
 
@@ -409,4 +410,10 @@ const SummaryCard = ({ label, value }) => (
 );
 
 export default ApplicationsPage;
+
+
+
+
+
+
 

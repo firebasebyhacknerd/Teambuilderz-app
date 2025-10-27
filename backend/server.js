@@ -276,6 +276,23 @@ async function setupDatabase() {
         CREATE INDEX idx_audit_logs_table ON audit_logs(table_name);
       `);
 
+      // Candidate assignment history
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS candidate_assignments (
+          id SERIAL PRIMARY KEY,
+          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+          recruiter_id INTEGER REFERENCES users(id),
+          assigned_by INTEGER REFERENCES users(id),
+          assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+          unassigned_at TIMESTAMP WITHOUT TIME ZONE,
+          note TEXT
+        );
+      `);
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_candidate_assignments_candidate ON candidate_assignments(candidate_id);
+      `);
+
       // Insert default users
       const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
       const recruiterPassword = process.env.RECRUITER_PASSWORD || 'recruit123';
@@ -319,6 +336,22 @@ async function setupDatabase() {
     await pool.query(`
       ALTER TABLE users
       ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITHOUT TIME ZONE
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS candidate_assignments (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        recruiter_id INTEGER REFERENCES users(id),
+        assigned_by INTEGER REFERENCES users(id),
+        assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        unassigned_at TIMESTAMP WITHOUT TIME ZONE,
+        note TEXT
+      )
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_candidate_assignments_candidate ON candidate_assignments(candidate_id)
     `);
   } catch (error) {
     console.error('Database setup error:', error.message);
@@ -561,21 +594,79 @@ app.get('/api/v1/candidates', verifyToken, async (req, res) => {
 // Create candidate
 app.post('/api/v1/candidates', verifyToken, async (req, res) => {
   try {
-    const { name, email, phone, visa_status, skills, experience_years, assigned_recruiter_id } = req.body;
-    
-    const result = await pool.query(`
-      INSERT INTO candidates (name, email, phone, visa_status, skills, experience_years, assigned_recruiter_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING *
-    `, [name, email, phone, visa_status, skills, experience_years, assigned_recruiter_id]);
+    const {
+      name,
+      email,
+      phone,
+      visa_status,
+      skills,
+      experience_years,
+      current_stage = 'onboarding',
+      marketing_start_date = null,
+      assigned_recruiter_id,
+    } = req.body;
 
-    // Log audit
-    await pool.query(`
-      INSERT INTO audit_logs (user_id, action, table_name, record_id, new_values)
-      VALUES ($1, 'CREATE', 'candidates', $2, $3)
-    `, [req.user.userId, result.rows[0].id, JSON.stringify(result.rows[0])]);
+    if (!name || !email) {
+      return res.status(400).json({ message: 'Name and email are required.' });
+    }
 
-    res.status(201).json(result.rows[0]);
+    let recruiterId = null;
+    if (assigned_recruiter_id !== undefined && assigned_recruiter_id !== null && assigned_recruiter_id !== '') {
+      const parsed = parseInt(assigned_recruiter_id, 10);
+      if (Number.isNaN(parsed)) {
+        return res.status(400).json({ message: 'Invalid recruiter id.' });
+      }
+      recruiterId = parsed;
+    }
+
+    if (req.user.role === 'Recruiter') {
+      recruiterId = req.user.userId;
+    }
+
+    if (recruiterId && req.user.role !== 'Admin' && recruiterId !== req.user.userId) {
+      return res.status(403).json({ message: 'You are not allowed to assign this candidate to another recruiter.' });
+    }
+
+    const insertResult = await pool.query(
+      `
+        INSERT INTO candidates (
+          name,
+          email,
+          phone,
+          visa_status,
+          skills,
+          experience_years,
+          current_stage,
+          marketing_start_date,
+          assigned_recruiter_id
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `,
+      [name, email, phone, visa_status, skills, experience_years, current_stage, marketing_start_date, recruiterId],
+    );
+
+    const candidate = insertResult.rows[0];
+
+    if (recruiterId) {
+      await pool.query(
+        `
+          INSERT INTO candidate_assignments (candidate_id, recruiter_id, assigned_by)
+          VALUES ($1, $2, $3)
+        `,
+        [candidate.id, recruiterId, req.user.userId],
+      );
+    }
+
+    await pool.query(
+      `
+        INSERT INTO audit_logs (user_id, action, table_name, record_id, new_values)
+        VALUES ($1, 'CREATE', 'candidates', $2, $3)
+      `,
+      [req.user.userId, candidate.id, JSON.stringify(candidate)],
+    );
+
+    res.status(201).json(candidate);
   } catch (error) {
     console.error('Error creating candidate:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -585,7 +676,13 @@ app.post('/api/v1/candidates', verifyToken, async (req, res) => {
 // Update candidate
 app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
   try {
-    const { id } = req.params;
+    const candidateId = parseInt(req.params.id, 10);
+    if (Number.isNaN(candidateId)) {
+      return res.status(400).json({ message: 'Invalid candidate id' });
+    }
+
+    await fetchCandidateWithAccess(candidateId, req.user);
+
     const {
       name,
       email,
@@ -599,12 +696,30 @@ app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
     } = req.body;
 
     // Get old values for audit
-    const oldResult = await pool.query('SELECT * FROM candidates WHERE id = $1', [id]);
+    const oldResult = await pool.query('SELECT * FROM candidates WHERE id = $1', [candidateId]);
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ message: 'Candidate not found' });
     }
 
     const oldCandidate = oldResult.rows[0];
+
+    let newAssignedRecruiterId = oldCandidate.assigned_recruiter_id;
+    if (assigned_recruiter_id !== undefined) {
+      if (assigned_recruiter_id === null || assigned_recruiter_id === '') {
+        newAssignedRecruiterId = null;
+      } else {
+        const parsed = parseInt(assigned_recruiter_id, 10);
+        if (Number.isNaN(parsed)) {
+          return res.status(400).json({ message: 'Invalid recruiter id.' });
+        }
+        newAssignedRecruiterId = parsed;
+      }
+
+      if (req.user.role !== 'Admin' && newAssignedRecruiterId !== oldCandidate.assigned_recruiter_id) {
+        return res.status(403).json({ message: 'Only admins can reassign candidates.' });
+      }
+    }
+
     const updatedCandidate = {
       name: name ?? oldCandidate.name,
       email: email ?? oldCandidate.email,
@@ -614,7 +729,7 @@ app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
       experience_years: experience_years ?? oldCandidate.experience_years,
       current_stage: current_stage ?? oldCandidate.current_stage,
       marketing_start_date: marketing_start_date ?? oldCandidate.marketing_start_date,
-      assigned_recruiter_id: assigned_recruiter_id ?? oldCandidate.assigned_recruiter_id
+      assigned_recruiter_id: newAssignedRecruiterId
     };
 
     const result = await pool.query(`
@@ -634,14 +749,35 @@ app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
       updatedCandidate.current_stage,
       updatedCandidate.marketing_start_date,
       updatedCandidate.assigned_recruiter_id,
-      id
+      candidateId
     ]);
+
+    if (oldCandidate.assigned_recruiter_id !== updatedCandidate.assigned_recruiter_id) {
+      await pool.query(
+        `
+          UPDATE candidate_assignments
+          SET unassigned_at = CURRENT_TIMESTAMP
+          WHERE candidate_id = $1 AND unassigned_at IS NULL
+        `,
+        [candidateId],
+      );
+
+      if (updatedCandidate.assigned_recruiter_id) {
+        await pool.query(
+          `
+            INSERT INTO candidate_assignments (candidate_id, recruiter_id, assigned_by)
+            VALUES ($1, $2, $3)
+          `,
+          [candidateId, updatedCandidate.assigned_recruiter_id, req.user.userId],
+        );
+      }
+    }
 
     // Log audit
     await pool.query(`
       INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
       VALUES ($1, 'UPDATE', 'candidates', $2, $3, $4)
-    `, [req.user.userId, id, JSON.stringify(oldCandidate), JSON.stringify(result.rows[0])]);
+    `, [req.user.userId, candidateId, JSON.stringify(oldCandidate), JSON.stringify(result.rows[0])]);
 
     res.json(result.rows[0]);
   } catch (error) {
@@ -663,6 +799,15 @@ app.delete('/api/v1/candidates/:id', verifyToken, async (req, res) => {
     if (candidateResult.rows.length === 0) {
       return res.status(404).json({ message: 'Candidate not found' });
     }
+
+    await pool.query(
+      `
+        UPDATE candidate_assignments
+        SET unassigned_at = CURRENT_TIMESTAMP
+        WHERE candidate_id = $1 AND unassigned_at IS NULL
+      `,
+      [id],
+    );
 
     await pool.query('DELETE FROM candidates WHERE id = $1', [id]);
 
@@ -751,6 +896,58 @@ app.get('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
       return res.status(error.statusCode).json({ message: error.message });
     }
     console.error('Error fetching notes:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.get('/api/v1/candidates/:id/assignments', verifyToken, async (req, res) => {
+  try {
+    const candidateId = parseInt(req.params.id, 10);
+    if (Number.isNaN(candidateId)) {
+      return res.status(400).json({ message: 'Invalid candidate id' });
+    }
+
+    await fetchCandidateWithAccess(candidateId, req.user);
+
+    const result = await pool.query(
+      `
+        SELECT
+          ca.id,
+          ca.candidate_id,
+          ca.recruiter_id,
+          ca.assigned_by,
+          ca.assigned_at,
+          ca.unassigned_at,
+          rec.name AS recruiter_name,
+          admin.name AS assigned_by_name
+        FROM candidate_assignments ca
+        LEFT JOIN users rec ON ca.recruiter_id = rec.id
+        LEFT JOIN users admin ON ca.assigned_by = admin.id
+        WHERE ca.candidate_id = $1
+        ORDER BY ca.assigned_at DESC
+      `,
+      [candidateId],
+    );
+
+    const history = result.rows.map((row) => ({
+      id: row.id,
+      candidateId: row.candidate_id,
+      recruiter: row.recruiter_id
+        ? { id: row.recruiter_id, name: row.recruiter_name }
+        : null,
+      assignedBy: row.assigned_by
+        ? { id: row.assigned_by, name: row.assigned_by_name }
+        : null,
+      assignedAt: row.assigned_at,
+      unassignedAt: row.unassigned_at,
+    }));
+
+    res.json(history);
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error fetching candidate assignments:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1707,6 +1904,76 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
   }
 });
 
+app.get('/api/v1/reports/leaderboard', verifyToken, async (req, res) => {
+  try {
+    const leaderboardResult = await pool.query(
+      `
+        WITH application_metrics AS (
+          SELECT
+            recruiter_id,
+            SUM(applications_count) AS total_applications,
+            SUM(CASE WHEN application_date = CURRENT_DATE THEN applications_count ELSE 0 END) AS today_applications,
+            SUM(CASE WHEN application_date >= CURRENT_DATE - INTERVAL '6 days' THEN applications_count ELSE 0 END) AS week_applications,
+            SUM(CASE WHEN application_date >= CURRENT_DATE - INTERVAL '29 days' THEN applications_count ELSE 0 END) AS month_applications
+          FROM applications
+          GROUP BY recruiter_id
+        ),
+        candidate_metrics AS (
+          SELECT
+            assigned_recruiter_id AS recruiter_id,
+            COUNT(*) FILTER (WHERE current_stage <> 'inactive') AS active_candidates,
+            COUNT(*) AS total_candidates
+          FROM candidates
+          GROUP BY assigned_recruiter_id
+        ),
+        note_metrics AS (
+          SELECT
+            author_id AS recruiter_id,
+            COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '6 days') AS notes_last_7_days
+          FROM notes
+          GROUP BY author_id
+        )
+        SELECT
+          u.id,
+          u.name,
+          u.daily_quota,
+          COALESCE(a.today_applications, 0) AS today_applications,
+          COALESCE(a.week_applications, 0) AS week_applications,
+          COALESCE(a.month_applications, 0) AS month_applications,
+          COALESCE(a.total_applications, 0) AS total_applications,
+          COALESCE(c.active_candidates, 0) AS active_candidates,
+          COALESCE(c.total_candidates, 0) AS total_candidates,
+          COALESCE(n.notes_last_7_days, 0) AS notes_last_7_days
+        FROM users u
+        LEFT JOIN application_metrics a ON a.recruiter_id = u.id
+        LEFT JOIN candidate_metrics c ON c.recruiter_id = u.id
+        LEFT JOIN note_metrics n ON n.recruiter_id = u.id
+        WHERE u.role = 'Recruiter' AND u.is_active = true
+        ORDER BY COALESCE(a.week_applications, 0) DESC, COALESCE(a.today_applications, 0) DESC, u.name ASC
+      `,
+    );
+
+    const leaderboard = leaderboardResult.rows.map((row, index) => ({
+      rank: index + 1,
+      recruiterId: row.id,
+      name: row.name,
+      dailyQuota: Number(row.daily_quota) || 0,
+      todayApplications: Number(row.today_applications) || 0,
+      weekApplications: Number(row.week_applications) || 0,
+      monthApplications: Number(row.month_applications) || 0,
+      totalApplications: Number(row.total_applications) || 0,
+      activeCandidates: Number(row.active_candidates) || 0,
+      totalCandidates: Number(row.total_candidates) || 0,
+      notesLast7Days: Number(row.notes_last_7_days) || 0,
+    }));
+
+    res.json({ leaderboard, generatedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error('Error building leaderboard:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 app.get('/api/v1/notifications', verifyToken, async (req, res) => {
   try {
     const isAdmin = req.user.role === 'Admin';
@@ -2219,6 +2486,7 @@ async function startServer() {
     console.log('    PUT  /api/v1/candidates/:id - Update candidate (requires auth)');
     console.log('    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)');
     console.log('    POST /api/v1/candidates/:id/notes - Create note (requires auth)');
+    console.log('    GET  /api/v1/candidates/:id/assignments - Assignment history (requires auth)');
     console.log('    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)');
     console.log('    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)');
     console.log('  Applications:');
@@ -2234,6 +2502,7 @@ async function startServer() {
     console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
     console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
     console.log('    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)');
+    console.log('    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)');
     console.log('  Notifications:');
     console.log('    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)');
     console.log('  Alerts:');

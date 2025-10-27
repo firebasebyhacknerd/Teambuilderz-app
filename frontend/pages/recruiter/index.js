@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, Home } from 'lucide-react';
+import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, Home, TrendingUp } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -91,13 +91,14 @@ const RecruiterDashboard = () => {
     { href: '/recruiter', label: 'Dashboard', icon: Home },
     { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+    { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
   ];
 
   if (loading) {
     return (
       <DashboardLayout title="Recruiter Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
-        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading dashboard…</div>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading dashboardâ€¦</div>
       </DashboardLayout>
     );
   }
@@ -236,3 +237,7 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
+
+
+
+

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   User,
@@ -38,6 +38,7 @@ import {
 const sidebarLinks = [
   { href: '/recruiter', label: 'Dashboard', icon: Home },
   { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
+  { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
 ];
@@ -671,4 +672,6 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
   </div>
 );
 export default CandidateDetailPage;
+
+
 

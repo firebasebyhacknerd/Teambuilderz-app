@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Plus,
@@ -9,7 +9,8 @@ import {
   Home,
   FileText,
   AlertTriangle,
-  User
+  User,
+  TrendingUp,
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -23,11 +24,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogClose
 } from '../../components/ui/dialog';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
+import { useCandidateAssignmentsQuery } from '../../lib/queryHooks';
 
 const stageBadges = {
   onboarding: 'bg-blue-100 text-blue-800',
@@ -44,12 +45,14 @@ const sidebarLinks = [
   { href: '/admin', label: 'Dashboard', icon: Home },
   { href: '/admin/candidates', label: 'Candidates', icon: Users },
   { href: '/admin/recruiters', label: 'Team Management', icon: User },
+  { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
 ];
 
 const AdminCandidates = () => {
   const router = useRouter();
+  const [token, setToken] = useState('');
   const [candidates, setCandidates] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +63,12 @@ const AdminCandidates = () => {
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const openCreateDialog = () => {
+    setEditingCandidate(null);
+    setError('');
+    setDialogOpen(true);
+  };
 
   const fetchData = async () => {
     const token = localStorage.getItem('token');
@@ -126,7 +135,6 @@ const AdminCandidates = () => {
   }, [candidates]);
 
   const handleCandidateSave = async (formData, resetForm) => {
-    const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
       return;
@@ -177,7 +185,6 @@ const AdminCandidates = () => {
     const confirmed = window.confirm('Are you sure you want to delete this candidate? This action cannot be undone.');
     if (!confirmed) return;
 
-    const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
       return;
@@ -203,25 +210,20 @@ const AdminCandidates = () => {
   };
 
   const actions = (
-    <DialogTrigger asChild>
-      <Button
-        size="sm"
-        className="gap-2"
-        onClick={() => {
-          setEditingCandidate(null);
-          setError('');
-        }}
-      >
-        <Plus size={16} />
-        Add Candidate
-      </Button>
-    </DialogTrigger>
+    <Button
+      size="sm"
+      className="gap-2"
+      onClick={openCreateDialog}
+    >
+      <Plus size={16} />
+      Add Candidate
+    </Button>
   );
 
   if (loading) {
     return (
       <DashboardLayout title="Candidate Management" subtitle="Loading assigned candidates" links={sidebarLinks}>
-        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidates…</div>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidatesâ€¦</div>
       </DashboardLayout>
     );
   }
@@ -303,7 +305,11 @@ const AdminCandidates = () => {
                 ))}
               </select>
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end gap-2 justify-end">
+              <Button variant="outline" className="gap-2" onClick={openCreateDialog}>
+                <Plus size={14} />
+                Add Candidate
+              </Button>
               <Button
                 variant="ghost"
                 onClick={() => {
@@ -421,6 +427,10 @@ const AdminCandidates = () => {
               <Users size={48} className="mx-auto text-muted-foreground" />
               <h3 className="text-lg font-medium text-foreground">No candidates match your filters</h3>
               <p className="text-sm text-muted-foreground">Adjust your filters or add a new candidate.</p>
+              <Button className="mt-2 gap-2" onClick={openCreateDialog}>
+                <Plus size={14} />
+                Add Candidate
+              </Button>
             </div>
           )}
         </Card>
@@ -450,7 +460,7 @@ const SummaryCard = ({ icon, title, value, accent }) => (
   </Card>
 );
 
-const CandidateDialog = ({ open, candidate, recruiters, error, isSaving, onSubmit }) => {
+const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, onSubmit }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -608,6 +618,44 @@ const CandidateDialog = ({ open, candidate, recruiters, error, isSaving, onSubmi
           />
         </div>
 
+        {candidate && (
+          <div className="border-t border-border mt-4 pt-4 space-y-2">
+            <h4 className="text-sm font-semibold text-foreground">Assignment History</h4>
+            {assignmentsLoading ? (
+              <p className="text-xs text-muted-foreground">Loading assignment history...</p>
+            ) : assignments.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No assignment history recorded yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {assignments.map((entry) => {
+                  const assignedLabel = entry.recruiter?.name ?? 'Unassigned';
+                  const assignedAtLabel = entry.assignedAt
+                    ? assignmentFormatter.format(new Date(entry.assignedAt))
+                    : 'Unknown';
+                  const unassignedAtLabel = entry.unassignedAt
+                    ? assignmentFormatter.format(new Date(entry.unassignedAt))
+                    : null;
+                  return (
+                    <div
+                      key={entry.id}
+                      className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs flex flex-col gap-1"
+                    >
+                      <span className="font-medium text-foreground">{assignedLabel}</span>
+                      <span className="text-muted-foreground">Assigned {assignedAtLabel}</span>
+                      {entry.assignedBy?.name && (
+                        <span className="text-muted-foreground">By {entry.assignedBy.name}</span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {unassignedAtLabel ? `Unassigned ${unassignedAtLabel}` : 'Current assignment'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {error && (
           <div className="text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
         )}
@@ -619,7 +667,7 @@ const CandidateDialog = ({ open, candidate, recruiters, error, isSaving, onSubmi
             </Button>
           </DialogClose>
           <Button type="submit" disabled={isSaving}>
-            {isSaving ? 'Saving…' : candidate ? 'Update Candidate' : 'Create Candidate'}
+            {isSaving ? 'Savingâ€¦' : candidate ? 'Update Candidate' : 'Create Candidate'}
           </Button>
         </DialogFooter>
       </form>
@@ -628,3 +676,7 @@ const CandidateDialog = ({ open, candidate, recruiters, error, isSaving, onSubmi
 };
 
 export default AdminCandidates;
+
+
+
+

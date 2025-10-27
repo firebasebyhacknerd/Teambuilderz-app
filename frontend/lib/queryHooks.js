@@ -34,6 +34,8 @@ export const queryKeys = {
   notifications: (token) => ['notifications', token],
   userActivity: (token) => ['user-activity', token],
   users: (token) => ['users', token],
+  leaderboard: (token) => ['leaderboard', token],
+  candidateAssignments: (token, candidateId) => ['candidate-assignments', token, candidateId],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -268,6 +270,20 @@ export const useNotificationsQuery = (token, enabled = true) =>
     refetchInterval: 15000,
   });
 
+export const useLeaderboardQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.leaderboard(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/reports/leaderboard`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load recruiter leaderboard.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: { leaderboard: [], generatedAt: null },
+    refetchInterval: 60000,
+  });
+
 export const useUserActivityQuery = (token, enabled = true) =>
   useQuery({
     queryKey: queryKeys.userActivity(token),
@@ -279,6 +295,20 @@ export const useUserActivityQuery = (token, enabled = true) =>
     },
     enabled: Boolean(token) && enabled,
     placeholderData: { users: [], generatedAt: null },
+    refetchInterval: 30000,
+  });
+
+export const useCandidateAssignmentsQuery = (token, candidateId, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.candidateAssignments(token, candidateId),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}/assignments`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load assignment history.');
+    },
+    enabled: Boolean(token) && Boolean(candidateId) && enabled,
+    placeholderData: [],
     refetchInterval: 30000,
   });
 
@@ -370,3 +400,4 @@ export const useDeleteUserMutation = (token, options = {}) => {
     ...options,
   });
 };
+
