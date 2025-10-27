@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Plus,
@@ -53,6 +53,7 @@ const sidebarLinks = [
 const AdminCandidates = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
+  const [userRole, setUserRole] = useState('Admin');
   const [candidates, setCandidates] = useState([]);
   const [recruiters, setRecruiters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -70,10 +71,23 @@ const AdminCandidates = () => {
     setDialogOpen(true);
   };
 
-  const fetchData = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedRole = localStorage.getItem('userRole');
+    if (!storedToken) {
       router.push('/login');
+      return;
+    }
+    setToken(storedToken);
+    if (!storedRole || storedRole !== 'Admin') {
+      router.replace('/recruiter');
+      return;
+    }
+    setUserRole(storedRole);
+  }, [router]);
+
+  const fetchData = useCallback(async () => {
+    if (!token) {
       return;
     }
 
@@ -81,10 +95,9 @@ const AdminCandidates = () => {
       setLoading(true);
       setError('');
 
-      const [candidatesRes, recruitersRes] = await Promise.all([
-        fetch(`${API_URL}/api/v1/candidates`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/api/v1/users`, { headers: { Authorization: `Bearer ${token}` } })
-      ]);
+      const candidatesRes = await fetch(`${API_URL}/api/v1/candidates`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
       if (candidatesRes.status === 401 || candidatesRes.status === 403) {
         router.push('/login');
@@ -92,22 +105,34 @@ const AdminCandidates = () => {
       }
 
       const candidatesData = await candidatesRes.json();
-      const recruitersData = await recruitersRes.json();
-
       setCandidates(candidatesData);
-      setRecruiters(recruitersData.filter((u) => u.role === 'Recruiter'));
+
+      if (userRole === 'Admin') {
+        const recruitersRes = await fetch(`${API_URL}/api/v1/users`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (recruitersRes.ok) {
+          const recruitersData = await recruitersRes.json();
+          setRecruiters(recruitersData.filter((u) => u.role === 'Recruiter'));
+        } else {
+          console.error('Unable to load recruiter list');
+          setRecruiters([]);
+        }
+      } else {
+        setRecruiters([]);
+      }
     } catch (fetchError) {
       console.error('Error fetching data:', fetchError);
       setError('Unable to load candidates. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [token, userRole, router]);
 
   useEffect(() => {
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchData]);
 
   const filteredCandidates = useMemo(() => {
     return candidates
