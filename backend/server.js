@@ -1,4 +1,4 @@
-﻿require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -1354,7 +1354,7 @@ app.post('/api/v1/applications', verifyToken, async (req, res) => {
 app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, channel, application_date } = req.body;
+    const { status, channel, application_date, applications_count } = req.body;
     const allowedStatuses = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 
     const existing = await pool.query('SELECT * FROM applications WHERE id = $1', [id]);
@@ -1369,10 +1369,18 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    const recruiterId = application.recruiter_id;
+    const normalizeDate = (value) => {
+      if (!value) return null;
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return null;
+      }
+      return date.toISOString().split('T')[0];
+    };
+
     const today = new Date().toISOString().split('T')[0];
-    const applicationDate = application.application_date
-      ? new Date(application.application_date).toISOString().split('T')[0]
-      : today;
+    const applicationDate = application.application_date ? normalizeDate(application.application_date) : today;
 
     if (req.user.role !== 'Admin' && applicationDate !== today) {
       return res.status(400).json({ message: 'Applications can only be modified on the day they are logged.' });
@@ -1397,6 +1405,15 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
       params.push(application_date);
     }
 
+    if (applications_count !== undefined) {
+      const parsedCount = Number(applications_count);
+      if (!Number.isFinite(parsedCount) || parsedCount < 0 || !Number.isInteger(parsedCount)) {
+        return res.status(400).json({ message: 'applications_count must be a non-negative integer.' });
+      }
+      updates.push(`applications_count = $${idx++}`);
+      params.push(parsedCount);
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ message: 'No valid fields provided to update.' });
     }
@@ -1415,15 +1432,56 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
       params
     );
 
+    const updatedApplication = updated.rows[0];
+
+    if (recruiterId) {
+      const oldDate = normalizeDate(application.application_date) || today;
+      const newDate = normalizeDate(updatedApplication.application_date) || today;
+      const datesToRefresh = new Set([oldDate, newDate].filter(Boolean));
+
+      for (const date of datesToRefresh) {
+        const aggregate = await pool.query(
+          `
+          SELECT COALESCE(SUM(applications_count), 0) AS total
+          FROM applications
+          WHERE recruiter_id = $1 AND application_date = $2
+        `,
+          [recruiterId, date]
+        );
+
+        const totalForDay = Number(aggregate.rows[0]?.total || 0);
+
+        if (totalForDay > 0) {
+          await pool.query(
+            `
+            INSERT INTO daily_activity (user_id, activity_date, applications_count)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, activity_date)
+            DO UPDATE SET applications_count = EXCLUDED.applications_count
+          `,
+            [recruiterId, date, totalForDay]
+          );
+        } else {
+          await pool.query(
+            `
+            DELETE FROM daily_activity
+            WHERE user_id = $1 AND activity_date = $2
+          `,
+            [recruiterId, date]
+          );
+        }
+      }
+    }
+
     await pool.query(
       `
       INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
       VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
     `,
-      [req.user.userId, id, JSON.stringify(application), JSON.stringify(updated.rows[0])]
+      [req.user.userId, id, JSON.stringify(application), JSON.stringify(updatedApplication)]
     );
 
-    res.json(updated.rows[0]);
+    res.json(updatedApplication);
   } catch (error) {
     console.error('Error updating application:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1509,6 +1567,75 @@ app.post('/api/v1/interviews', verifyToken, async (req, res) => {
   }
 });
 
+app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, scheduled_date, round_number, timezone, notes } = req.body;
+
+    const updates = [];
+    const params = [];
+
+    if (status !== undefined) {
+      const allowedStatuses = ['scheduled', 'completed', 'feedback_pending', 'rejected', 'advanced'];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ message: 'Invalid interview status.' });
+      }
+      updates.push(`status = $${updates.length + 1}`);
+      params.push(status);
+    }
+
+    if (scheduled_date !== undefined) {
+      updates.push(`scheduled_date = $${updates.length + 1}`);
+      params.push(scheduled_date ? new Date(scheduled_date) : null);
+    }
+
+    if (round_number !== undefined) {
+      const roundNumber = Number(round_number);
+      if (!Number.isFinite(roundNumber) || roundNumber < 1) {
+        return res.status(400).json({ message: 'Round number must be a positive integer.' });
+      }
+      updates.push(`round_number = $${updates.length + 1}`);
+      params.push(roundNumber);
+    }
+
+    if (timezone !== undefined) {
+      updates.push(`timezone = $${updates.length + 1}`);
+      params.push(timezone || null);
+    }
+
+    if (notes !== undefined) {
+      updates.push(`notes = $${updates.length + 1}`);
+      params.push(notes || null);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No interview fields provided for update.' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    const result = await pool.query(
+      `
+        UPDATE interviews
+        SET ${updates.join(', ')}
+        WHERE id = $${params.length}
+        RETURNING *
+      `,
+      params,
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Interview not found.' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating interview:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Assessments API endpoints
 app.get('/api/v1/assessments', verifyToken, async (req, res) => {
   try {
@@ -1578,6 +1705,70 @@ app.post('/api/v1/assessments', verifyToken, async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (error) {
     console.error('Error creating assessment:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, due_date, score, notes } = req.body;
+
+    const updates = [];
+    const params = [];
+
+    if (status !== undefined) {
+      const allowedStatuses = ['assigned', 'submitted', 'passed', 'failed', 'waived'];
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ message: 'Invalid assessment status.' });
+      }
+      updates.push(`status = $${updates.length + 1}`);
+      params.push(status);
+    }
+
+    if (due_date !== undefined) {
+      updates.push(`due_date = $${updates.length + 1}`);
+      params.push(due_date ? new Date(due_date) : null);
+    }
+
+    if (score !== undefined) {
+      const numericScore = score === null || score === '' ? null : Number(score);
+      if (numericScore !== null && !Number.isFinite(numericScore)) {
+        return res.status(400).json({ message: 'Score must be a number.' });
+      }
+      updates.push(`score = $${updates.length + 1}`);
+      params.push(numericScore);
+    }
+
+    if (notes !== undefined) {
+      updates.push(`notes = $${updates.length + 1}`);
+      params.push(notes || null);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No assessment fields provided for update.' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(id);
+
+    const result = await pool.query(
+      `
+        UPDATE assessments
+        SET ${updates.join(', ')}
+        WHERE id = $${params.length}
+        RETURNING *
+      `,
+      params,
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Assessment not found.' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error updating assessment:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

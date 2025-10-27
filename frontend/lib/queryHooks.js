@@ -154,6 +154,78 @@ export const useCreateAssessmentMutation = (token, options = {}) => {
   });
 };
 
+export const useUpdateInterviewMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ interviewId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/interviews/${interviewId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to update interview.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'interviews',
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useUpdateAssessmentMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ assessmentId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/assessments/${assessmentId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to update assessment.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'assessments',
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useUpdateApplicationMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ applicationId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/applications/${applicationId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+
+      return handleResponse(response, 'Unable to update application.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
 export const useLogApplicationMutation = (token, options = {}) => {
   const queryClient = useQueryClient();
 

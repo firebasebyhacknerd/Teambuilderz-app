@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp } from 'lucide-react';
+import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp, Edit, Check, X } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -12,6 +12,7 @@ import {
   useLogApplicationMutation,
   useInterviewsQuery,
   useAssessmentsQuery,
+  useUpdateApplicationMutation,
 } from '../../lib/queryHooks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
@@ -24,6 +25,9 @@ const ApplicationsPage = () => {
   const [userName, setUserName] = useState('Recruiter');
   const [userRole, setUserRole] = useState('Recruiter');
   const [formMessage, setFormMessage] = useState(null);
+  const [editingApplicationId, setEditingApplicationId] = useState(null);
+  const [editingApplicationsCount, setEditingApplicationsCount] = useState('');
+  const [editMessage, setEditMessage] = useState(null);
 
   const createDefaultFormValues = () => ({
     candidateId: '',
@@ -107,6 +111,20 @@ const ApplicationsPage = () => {
     isLoading: assessmentsLoading,
     isRefetching: assessmentsRefetching,
   } = useAssessmentsQuery(token, assessmentQueryParams, Boolean(token));
+
+  const updateApplication = useUpdateApplicationMutation(token, {
+    onSuccess: () => {
+      setEditMessage({ type: 'success', text: 'Application updated successfully.' });
+      setEditingApplicationId(null);
+      setEditingApplicationsCount('');
+    },
+    onError: (error) => {
+      setEditMessage({
+        type: 'error',
+        text: error.message || 'Unable to update application.',
+      });
+    },
+  });
 
   const logApplication = useLogApplicationMutation(token, {
     onSuccess: () => {
@@ -301,6 +319,43 @@ const ApplicationsPage = () => {
     }
     setFormValues(defaults);
     setFormMessage(null);
+  };
+
+  const handleStartEdit = (application) => {
+    if (updateApplication.isPending) return;
+    setEditingApplicationId(application.id);
+    setEditingApplicationsCount(String(application.applications_count ?? 0));
+    setEditMessage(null);
+  };
+
+  const handleCancelEdit = () => {
+    if (updateApplication.isPending) return;
+    setEditingApplicationId(null);
+    setEditingApplicationsCount('');
+    setEditMessage(null);
+  };
+
+  const handleSaveEdit = (applicationId) => {
+    if (!token || !applicationId || updateApplication.isPending) {
+      return;
+    }
+
+    if (editingApplicationsCount === '') {
+      setEditMessage({ type: 'error', text: 'Enter a count before saving.' });
+      return;
+    }
+
+    const parsedCount = Number(editingApplicationsCount);
+    if (!Number.isInteger(parsedCount) || parsedCount < 0) {
+      setEditMessage({ type: 'error', text: 'Applications count must be a non-negative integer.' });
+      return;
+    }
+
+    setEditMessage(null);
+    updateApplication.mutate({
+      applicationId,
+      payload: { applications_count: parsedCount },
+    });
   };
 
   const handleSubmit = (event) => {
@@ -866,8 +921,20 @@ const ApplicationsPage = () => {
               No applications found. Adjust filters or add a new submission.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="p-6 space-y-4">
+              {editMessage && (
+                <div
+                  className={`rounded-md border px-4 py-2 text-sm ${
+                    editMessage.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-800'
+                      : 'border-red-200 bg-red-50 text-red-800'
+                  }`}
+                >
+                  {editMessage.text}
+                </div>
+              )}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
                 <thead className="bg-muted/50 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Candidate</th>
@@ -877,30 +944,115 @@ const ApplicationsPage = () => {
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Applied On</th>
                     <th className="px-4 py-3 text-right font-medium">Count</th>
+                    <th className="px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredApplications.map((application) => (
-                    <tr
-                      key={application.id}
-                      className="border-b border-border hover:bg-accent/60 transition cursor-pointer"
-                      onClick={() => goToCandidate(application.candidate_id)}
-                    >
-                      <td className="px-4 py-3 text-foreground">{application.candidate_name || '--'}</td>
-                      <td className="px-4 py-3 text-foreground">{application.company_name || '--'}</td>
-                      <td className="px-4 py-3 text-foreground">{application.job_title || '--'}</td>
-                      <td className="px-4 py-3 capitalize text-muted-foreground">{application.channel || '--'}</td>
-                      <td className="px-4 py-3 capitalize text-muted-foreground">{application.status || '--'}</td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {application.application_date ? new Date(application.application_date).toLocaleDateString() : '--'}
-                      </td>
-                      <td className="px-4 py-3 text-right text-foreground font-medium">
-                        {application.applications_count || 0}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredApplications.map((application) => {
+                    const isEditing = editingApplicationId === application.id;
+                    const normalizedDate = application.application_date
+                      ? new Date(application.application_date).toISOString().split('T')[0]
+                      : null;
+                    const canEdit =
+                      userRole === 'Admin' || (normalizedDate ? normalizedDate === today : true);
+                    const rowClasses = `border-b border-border transition ${
+                      isEditing ? 'bg-muted/30' : 'hover:bg-accent/60 cursor-pointer'
+                    }`;
+
+                    return (
+                      <tr
+                        key={application.id}
+                        className={rowClasses}
+                        onClick={
+                          !isEditing ? () => goToCandidate(application.candidate_id) : undefined
+                        }
+                      >
+                        <td className="px-4 py-3 text-foreground">{application.candidate_name || '--'}</td>
+                        <td className="px-4 py-3 text-foreground">{application.company_name || '--'}</td>
+                        <td className="px-4 py-3 text-foreground">{application.job_title || '--'}</td>
+                        <td className="px-4 py-3 capitalize text-muted-foreground">{application.channel || '--'}</td>
+                        <td className="px-4 py-3 capitalize text-muted-foreground">{application.status || '--'}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {application.application_date
+                            ? new Date(application.application_date).toLocaleDateString()
+                            : '--'}
+                        </td>
+                        <td className="px-4 py-3 text-right text-foreground font-medium">
+                          {isEditing ? (
+                            <Input
+                              type="number"
+                              min={0}
+                              value={editingApplicationsCount}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => {
+                                setEditingApplicationsCount(event.target.value);
+                                if (editMessage) setEditMessage(null);
+                              }}
+                              className="w-24 ml-auto"
+                            />
+                          ) : (
+                            application.applications_count || 0
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {isEditing ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleCancelEdit();
+                                }}
+                                disabled={updateApplication.isPending}
+                              >
+                                <X size={14} />
+                                <span className="sr-only">Cancel</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleSaveEdit(application.id);
+                                }}
+                                disabled={updateApplication.isPending}
+                              >
+                                {updateApplication.isPending ? (
+                                  'Saving...'
+                                ) : (
+                                  <>
+                                    <Check size={14} className="mr-1" />
+                                    Save
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          ) : canEdit ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleStartEdit(application);
+                              }}
+                              disabled={Boolean(editingApplicationId)}
+                            >
+                              <Edit size={14} className="mr-1" />
+                              Edit
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Locked</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </Card>

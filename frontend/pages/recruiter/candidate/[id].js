@@ -37,6 +37,8 @@ import {
   useAssessmentsQuery,
   useCreateInterviewMutation,
   useCreateAssessmentMutation,
+  useUpdateInterviewMutation,
+  useUpdateAssessmentMutation,
 } from '../../../lib/queryHooks';
 
 const sidebarLinks = [
@@ -55,6 +57,9 @@ const stageBadges = {
   placed: 'bg-emerald-100 text-emerald-800',
   inactive: 'bg-gray-100 text-gray-800'
 };
+
+const INTERVIEW_STATUSES = ['scheduled', 'completed', 'feedback_pending', 'advanced', 'rejected'];
+const ASSESSMENT_STATUSES = ['assigned', 'submitted', 'passed', 'failed', 'waived'];
 
 const CandidateDetailPage = () => {
   const router = useRouter();
@@ -95,6 +100,11 @@ const CandidateDetailPage = () => {
   });
   const [interviewMessage, setInterviewMessage] = useState(null);
   const [assessmentMessage, setAssessmentMessage] = useState(null);
+  const [interviewStatusDrafts, setInterviewStatusDrafts] = useState({});
+  const [assessmentStatusDrafts, setAssessmentStatusDrafts] = useState({});
+  const [assessmentScoreDrafts, setAssessmentScoreDrafts] = useState({});
+  const [interviewTimelineMessage, setInterviewTimelineMessage] = useState(null);
+  const [assessmentTimelineMessage, setAssessmentTimelineMessage] = useState(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -211,15 +221,18 @@ const CandidateDetailPage = () => {
     },
   });
 
-  const createAssessment = useCreateAssessmentMutation(token, {
-    onSuccess: () => {
-      setAssessmentMessage({ type: 'success', text: 'Assessment logged successfully.' });
-      resetAssessmentForm();
-    },
-    onError: (mutationError) => {
-      setAssessmentMessage({ type: 'error', text: mutationError.message || 'Unable to log assessment.' });
-    },
-  });
+const createAssessment = useCreateAssessmentMutation(token, {
+  onSuccess: () => {
+    setAssessmentMessage({ type: 'success', text: 'Assessment logged successfully.' });
+    resetAssessmentForm();
+  },
+  onError: (mutationError) => {
+    setAssessmentMessage({ type: 'error', text: mutationError.message || 'Unable to log assessment.' });
+  },
+});
+
+  const updateInterview = useUpdateInterviewMutation(token);
+  const updateAssessment = useUpdateAssessmentMutation(token);
 
   const handleInterviewFieldChange = (field) => (event) => {
     const { value } = event.target;
@@ -341,6 +354,115 @@ const CandidateDetailPage = () => {
       status: 'assigned',
       notes: trimmedAssessmentNotes || undefined,
     });
+  };
+
+  const handleInterviewStatusChange = (interviewId, nextValue) => {
+    setInterviewStatusDrafts((prev) => ({ ...prev, [interviewId]: nextValue }));
+    setInterviewTimelineMessage(null);
+  };
+
+  const handleAssessmentStatusChange = (assessmentId, nextValue) => {
+    setAssessmentStatusDrafts((prev) => ({ ...prev, [assessmentId]: nextValue }));
+    setAssessmentTimelineMessage(null);
+  };
+
+  const handleAssessmentScoreChange = (assessmentId, value) => {
+    setAssessmentScoreDrafts((prev) => ({ ...prev, [assessmentId]: value }));
+    setAssessmentTimelineMessage(null);
+  };
+
+  const handleInterviewStatusSave = (interview) => {
+    const draftStatus = interviewStatusDrafts[interview.id];
+    const payload = {};
+
+    if (draftStatus !== undefined && draftStatus !== interview.status) {
+      payload.status = draftStatus;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setInterviewTimelineMessage({
+        type: 'info',
+        text: 'No interview changes to save.',
+      });
+      return;
+    }
+
+    setInterviewTimelineMessage(null);
+
+    updateInterview.mutate(
+      { interviewId: interview.id, payload },
+      {
+        onSuccess: () => {
+          setInterviewTimelineMessage({ type: 'success', text: 'Interview updated.' });
+          setInterviewStatusDrafts((prev) => {
+            const { [interview.id]: _discard, ...rest } = prev;
+            return rest;
+          });
+        },
+        onError: (error) => {
+          setInterviewTimelineMessage({
+            type: 'error',
+            text: error.message || 'Unable to update interview.',
+          });
+        },
+      },
+    );
+  };
+
+  const handleAssessmentUpdate = (assessment) => {
+    const draftStatus = assessmentStatusDrafts[assessment.id];
+    const draftScoreRaw = assessmentScoreDrafts[assessment.id];
+
+    const payload = {};
+
+    if (draftStatus !== undefined && draftStatus !== assessment.status) {
+      payload.status = draftStatus;
+    }
+
+    if (draftScoreRaw !== undefined) {
+      const cleaned = draftScoreRaw === '' ? null : Number(draftScoreRaw);
+      if (cleaned !== null && !Number.isFinite(cleaned)) {
+        setAssessmentTimelineMessage({
+          type: 'error',
+          text: 'Score must be a number.',
+        });
+        return;
+      }
+      payload.score = cleaned;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      setAssessmentTimelineMessage({
+        type: 'info',
+        text: 'No assessment changes to save.',
+      });
+      return;
+    }
+
+    setAssessmentTimelineMessage(null);
+
+    updateAssessment.mutate(
+      { assessmentId: assessment.id, payload },
+      {
+        onSuccess: () => {
+          setAssessmentTimelineMessage({ type: 'success', text: 'Assessment updated.' });
+          setAssessmentStatusDrafts((prev) => {
+            const { [assessment.id]: _discard, ...rest } = prev;
+            return rest;
+          });
+          setAssessmentScoreDrafts((prev) => {
+            const { [assessment.id]: _discard, ...rest } = prev;
+            return rest;
+          });
+        },
+        onError: (error) => {
+          setAssessmentTimelineMessage({
+            type: 'error',
+            text: error.message || 'Unable to update assessment.',
+          });
+        },
+      },
+    );
   };
 
   const resetNoteForm = (clearMessage = false) => {
@@ -864,6 +986,19 @@ const CandidateDetailPage = () => {
             </div>
           ) : (
             <div className="space-y-3">
+              {interviewTimelineMessage && (
+                <div
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    interviewTimelineMessage.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : interviewTimelineMessage.type === 'error'
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-border bg-muted/50 text-muted-foreground'
+                  }`}
+                >
+                  {interviewTimelineMessage.text}
+                </div>
+              )}
               {candidateInterviews.map((interview) => (
                 <div key={interview.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -880,8 +1015,32 @@ const CandidateDetailPage = () => {
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    <span>{formatLabel(interview.status)}</span>
                     <span>{interview.timezone || 'UTC'}</span>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <label className="flex flex-col text-xs text-muted-foreground">
+                      <span className="mb-1 font-medium text-foreground">Status</span>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={interviewStatusDrafts[interview.id] ?? interview.status}
+                        onChange={(event) => handleInterviewStatusChange(interview.id, event.target.value)}
+                      >
+                        {INTERVIEW_STATUSES.map((statusOption) => (
+                          <option key={statusOption} value={statusOption}>
+                            {formatLabel(statusOption)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="self-start"
+                      onClick={() => handleInterviewStatusSave(interview)}
+                      disabled={updateInterview.isPending}
+                    >
+                      {updateInterview.isPending ? 'Saving...' : 'Save'}
+                    </Button>
                   </div>
                   {interview.notes ? (
                     <p className="mt-2 text-xs text-muted-foreground">{interview.notes}</p>
@@ -908,6 +1067,19 @@ const CandidateDetailPage = () => {
             </div>
           ) : (
             <div className="space-y-3">
+              {assessmentTimelineMessage && (
+                <div
+                  className={`rounded-md border px-3 py-2 text-xs ${
+                    assessmentTimelineMessage.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : assessmentTimelineMessage.type === 'error'
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-border bg-muted/50 text-muted-foreground'
+                  }`}
+                >
+                  {assessmentTimelineMessage.text}
+                </div>
+              )}
               {candidateAssessments.map((assessment) => (
                 <div key={assessment.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -923,8 +1095,44 @@ const CandidateDetailPage = () => {
                       Due {formatDate(assessment.due_date)}
                     </span>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    <span>{formatLabel(assessment.status)}</span>
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <label className="flex flex-col gap-1">
+                      <span className="font-medium text-foreground">Status</span>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={assessmentStatusDrafts[assessment.id] ?? assessment.status}
+                        onChange={(event) => handleAssessmentStatusChange(assessment.id, event.target.value)}
+                      >
+                        {ASSESSMENT_STATUSES.map((statusOption) => (
+                          <option key={statusOption} value={statusOption}>
+                            {formatLabel(statusOption)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1">
+                      <span className="font-medium text-foreground">Score (optional)</span>
+                      <Input
+                        value={
+                          Object.prototype.hasOwnProperty.call(assessmentScoreDrafts, assessment.id)
+                            ? assessmentScoreDrafts[assessment.id]
+                            : assessment.score ?? ''
+                        }
+                        onChange={(event) => handleAssessmentScoreChange(assessment.id, event.target.value)}
+                        placeholder="e.g., 85"
+                      />
+                    </label>
+                    <div className="flex items-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={() => handleAssessmentUpdate(assessment)}
+                        disabled={updateAssessment.isPending}
+                      >
+                        {updateAssessment.isPending ? 'Saving...' : 'Save'}
+                      </Button>
+                    </div>
                   </div>
                   {assessment.notes ? (
                     <p className="mt-2 text-xs text-muted-foreground">{assessment.notes}</p>
@@ -1215,6 +1423,7 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
   </div>
 );
 export default CandidateDetailPage;
+
 
 
 
