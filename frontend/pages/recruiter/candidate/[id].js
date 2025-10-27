@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   User,
@@ -33,6 +33,10 @@ import {
   useCreateCandidateNoteMutation,
   useUpdateCandidateNoteMutation,
   useDeleteCandidateNoteMutation,
+  useInterviewsQuery,
+  useAssessmentsQuery,
+  useCreateInterviewMutation,
+  useCreateAssessmentMutation,
 } from '../../../lib/queryHooks';
 
 const sidebarLinks = [
@@ -72,6 +76,25 @@ const CandidateDetailPage = () => {
   const [noteFollowUpPriority, setNoteFollowUpPriority] = useState(1);
   const [noteMessage, setNoteMessage] = useState(null);
   const [editingNoteId, setEditingNoteId] = useState(null);
+  const [defaultTimezone, setDefaultTimezone] = useState('UTC');
+  const [interviewFormOpen, setInterviewFormOpen] = useState(false);
+  const [assessmentFormOpen, setAssessmentFormOpen] = useState(false);
+  const [interviewForm, setInterviewForm] = useState({
+    company: '',
+    date: '',
+    type: 'phone',
+    round: '1',
+    timezone: 'UTC',
+    notes: '',
+  });
+  const [assessmentForm, setAssessmentForm] = useState({
+    platform: '',
+    type: 'technical',
+    dueDate: '',
+    notes: '',
+  });
+  const [interviewMessage, setInterviewMessage] = useState(null);
+  const [assessmentMessage, setAssessmentMessage] = useState(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -91,6 +114,18 @@ const CandidateDetailPage = () => {
     }
   }, [router]);
 
+  useEffect(() => {
+    if (typeof Intl === 'undefined') return;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (timezone) {
+      setDefaultTimezone(timezone);
+      setInterviewForm((prev) => ({
+        ...prev,
+        timezone: prev.timezone && prev.timezone !== 'UTC' ? prev.timezone : timezone,
+      }));
+    }
+  }, []);
+
   const candidateId = useMemo(() => {
     if (!id) return null;
     const numericId = Array.isArray(id) ? parseInt(id[0], 10) : parseInt(id, 10);
@@ -104,6 +139,24 @@ const CandidateDetailPage = () => {
     [candidates, candidateId]
   );
 
+  const defaultInterviewCompany = useMemo(() => {
+    if (!candidate) return '';
+    return (
+      candidate.current_company ||
+      candidate.company ||
+      candidate.company_name ||
+      (candidate.name ? `${candidate.name} Interview` : '')
+    );
+  }, [candidate]);
+
+  useEffect(() => {
+    if (!defaultInterviewCompany) return;
+    setInterviewForm((prev) => ({
+      ...prev,
+      company: prev.company || defaultInterviewCompany,
+    }));
+  }, [defaultInterviewCompany]);
+
   useEffect(() => {
     if (candidate && !editing) {
       setDailyApps(candidate.daily_applications || 0);
@@ -115,6 +168,180 @@ const CandidateDetailPage = () => {
     data: notes = [],
     isLoading: notesLoading,
   } = useCandidateNotesQuery(token, candidateId, Boolean(token && candidateId));
+
+  const {
+    data: candidateInterviews = [],
+    isLoading: candidateInterviewsLoading,
+    isRefetching: candidateInterviewsRefetching,
+  } = useInterviewsQuery(token, { candidate_id: candidateId }, Boolean(token && candidateId));
+
+  const {
+    data: candidateAssessments = [],
+    isLoading: candidateAssessmentsLoading,
+    isRefetching: candidateAssessmentsRefetching,
+  } = useAssessmentsQuery(token, { candidate_id: candidateId }, Boolean(token && candidateId));
+
+  const resetInterviewForm = useCallback(() => {
+    setInterviewForm({
+      company: defaultInterviewCompany || '',
+      date: '',
+      type: 'phone',
+      round: '1',
+      timezone: defaultTimezone || 'UTC',
+      notes: '',
+    });
+  }, [defaultInterviewCompany, defaultTimezone]);
+
+  const resetAssessmentForm = useCallback(() => {
+    setAssessmentForm({
+      platform: '',
+      type: 'technical',
+      dueDate: '',
+      notes: '',
+    });
+  }, []);
+
+  const createInterview = useCreateInterviewMutation(token, {
+    onSuccess: () => {
+      setInterviewMessage({ type: 'success', text: 'Interview logged successfully.' });
+      resetInterviewForm();
+    },
+    onError: (mutationError) => {
+      setInterviewMessage({ type: 'error', text: mutationError.message || 'Unable to log interview.' });
+    },
+  });
+
+  const createAssessment = useCreateAssessmentMutation(token, {
+    onSuccess: () => {
+      setAssessmentMessage({ type: 'success', text: 'Assessment logged successfully.' });
+      resetAssessmentForm();
+    },
+    onError: (mutationError) => {
+      setAssessmentMessage({ type: 'error', text: mutationError.message || 'Unable to log assessment.' });
+    },
+  });
+
+  const handleInterviewFieldChange = (field) => (event) => {
+    const { value } = event.target;
+    setInterviewForm((prev) => ({ ...prev, [field]: value }));
+    if (interviewMessage) setInterviewMessage(null);
+  };
+
+  const handleAssessmentFieldChange = (field) => (event) => {
+    const { value } = event.target;
+    setAssessmentForm((prev) => ({ ...prev, [field]: value }));
+    if (assessmentMessage) setAssessmentMessage(null);
+  };
+
+  const handleInterviewToggle = () => {
+    if (interviewFormOpen) {
+      resetInterviewForm();
+      setInterviewMessage(null);
+      setInterviewFormOpen(false);
+      return;
+    }
+    if (!interviewForm.company && defaultInterviewCompany) {
+      setInterviewForm((prev) => ({ ...prev, company: defaultInterviewCompany }));
+    }
+    setInterviewMessage(null);
+    setInterviewFormOpen(true);
+  };
+
+  const handleAssessmentToggle = () => {
+    if (assessmentFormOpen) {
+      resetAssessmentForm();
+      setAssessmentMessage(null);
+      setAssessmentFormOpen(false);
+      return;
+    }
+    setAssessmentMessage(null);
+    setAssessmentFormOpen(true);
+  };
+
+  const handleInterviewSubmit = (event) => {
+    event.preventDefault();
+    if (!candidateId) {
+      setInterviewMessage({ type: 'error', text: 'Missing candidate context. Please reload and try again.' });
+      return;
+    }
+    if (createInterview.isPending) return;
+
+    const trimmedCompany = (interviewForm.company || '').trim();
+    if (!trimmedCompany) {
+      setInterviewMessage({ type: 'error', text: 'Please add the interview company before saving.' });
+      return;
+    }
+
+    if (!interviewForm.date) {
+      setInterviewMessage({ type: 'error', text: 'Please provide the interview date and time.' });
+      return;
+    }
+
+    const scheduledDate = new Date(interviewForm.date);
+    if (Number.isNaN(scheduledDate.getTime())) {
+      setInterviewMessage({ type: 'error', text: 'Interview date is invalid. Please adjust and try again.' });
+      return;
+    }
+
+    const roundNumber = parseInt(interviewForm.round, 10);
+    if (!Number.isFinite(roundNumber) || roundNumber < 1) {
+      setInterviewMessage({ type: 'error', text: 'Interview round must be a positive number.' });
+      return;
+    }
+
+    const timezoneValue = (interviewForm.timezone || '').trim() || defaultTimezone || 'UTC';
+    const trimmedNotes = (interviewForm.notes || '').trim();
+
+    createInterview.mutate({
+      candidate_id: candidateId,
+      application_id: null,
+      company_name: trimmedCompany,
+      interview_type: interviewForm.type || 'phone',
+      round_number: roundNumber,
+      scheduled_date: scheduledDate.toISOString(),
+      timezone: timezoneValue,
+      status: 'scheduled',
+      notes: trimmedNotes || undefined,
+    });
+  };
+
+  const handleAssessmentSubmit = (event) => {
+    event.preventDefault();
+    if (!candidateId) {
+      setAssessmentMessage({ type: 'error', text: 'Missing candidate context. Please reload and try again.' });
+      return;
+    }
+    if (createAssessment.isPending) return;
+
+    const trimmedPlatform = (assessmentForm.platform || '').trim();
+    if (!trimmedPlatform) {
+      setAssessmentMessage({ type: 'error', text: 'Please add the assessment platform before saving.' });
+      return;
+    }
+
+    if (!assessmentForm.dueDate) {
+      setAssessmentMessage({ type: 'error', text: 'Please provide the assessment due date.' });
+      return;
+    }
+
+    const dueDate = new Date(assessmentForm.dueDate);
+    if (Number.isNaN(dueDate.getTime())) {
+      setAssessmentMessage({ type: 'error', text: 'Assessment due date is invalid. Please adjust and try again.' });
+      return;
+    }
+
+    const trimmedAssessmentNotes = (assessmentForm.notes || '').trim();
+
+    createAssessment.mutate({
+      candidate_id: candidateId,
+      application_id: null,
+      assessment_platform: trimmedPlatform,
+      assessment_type: assessmentForm.type || 'technical',
+      due_date: dueDate.toISOString(),
+      status: 'assigned',
+      notes: trimmedAssessmentNotes || undefined,
+    });
+  };
 
   const resetNoteForm = (clearMessage = false) => {
     setEditingNoteId(null);
@@ -278,6 +505,25 @@ const CandidateDetailPage = () => {
     }
   };
 
+  const formatDate = (value) => {
+    if (!value) return '--';
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+      }).format(new Date(value));
+    } catch (err) {
+      return String(value);
+    }
+  };
+
+  const formatLabel = (value) => {
+    if (!value) return '--';
+    return String(value)
+      .split('_')
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ');
+  };
+
   const stageLabel = useMemo(() => {
     if (!candidate?.current_stage) return 'N/A';
     return candidate.current_stage
@@ -390,6 +636,303 @@ const CandidateDetailPage = () => {
             suffix="%"
             tone="bg-purple-100 text-purple-700"
           />
+        </Card>
+      </div>
+
+      <Card className="p-6 space-y-6 mt-6">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">Pipeline Actions</h3>
+          <p className="text-sm text-muted-foreground">
+            Quickly log interviews and assessments without leaving the candidate profile.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-foreground">Interview</h4>
+                <p className="text-xs text-muted-foreground">
+                  Capture upcoming conversations or milestones tied to this candidate.
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={handleInterviewToggle}>
+                {interviewFormOpen ? 'Close' : 'Add'}
+              </Button>
+            </div>
+            {interviewMessage && (
+              <div
+                className={`rounded-md border px-3 py-2 text-xs ${
+                  interviewMessage.type === 'success'
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-red-200 bg-red-50 text-red-700'
+                }`}
+              >
+                {interviewMessage.text}
+              </div>
+            )}
+            {interviewFormOpen && (
+              <form onSubmit={handleInterviewSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="interview-company">Company</Label>
+                  <Input
+                    id="interview-company"
+                    value={interviewForm.company}
+                    onChange={handleInterviewFieldChange('company')}
+                    placeholder="e.g., Acme Corp."
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="interview-round">Round</Label>
+                    <Input
+                      id="interview-round"
+                      type="number"
+                      min={1}
+                      value={interviewForm.round}
+                      onChange={handleInterviewFieldChange('round')}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="interview-timezone">Timezone</Label>
+                    <Input
+                      id="interview-timezone"
+                      value={interviewForm.timezone}
+                      onChange={handleInterviewFieldChange('timezone')}
+                      placeholder="e.g., America/Chicago"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="interview-datetime">Date &amp; time</Label>
+                    <Input
+                      id="interview-datetime"
+                      type="datetime-local"
+                      value={interviewForm.date}
+                      onChange={handleInterviewFieldChange('date')}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="interview-type">Interview type</Label>
+                    <select
+                      id="interview-type"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={interviewForm.type}
+                      onChange={handleInterviewFieldChange('type')}
+                    >
+                      <option value="phone">Phone</option>
+                      <option value="video">Video</option>
+                      <option value="onsite">On-site</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="interview-notes">Notes (optional)</Label>
+                  <Textarea
+                    id="interview-notes"
+                    value={interviewForm.notes}
+                    onChange={handleInterviewFieldChange('notes')}
+                    rows={2}
+                    placeholder="Add prep notes or context..."
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={resetInterviewForm}
+                    disabled={createInterview.isPending}
+                  >
+                    Reset
+                  </Button>
+                  <Button type="submit" disabled={createInterview.isPending}>
+                    {createInterview.isPending ? 'Saving...' : 'Save Interview'}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+          <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-base font-semibold text-foreground">Assessment</h4>
+                <p className="text-xs text-muted-foreground">
+                  Assign or track assessments linked to this candidate.
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={handleAssessmentToggle}>
+                {assessmentFormOpen ? 'Close' : 'Add'}
+              </Button>
+            </div>
+            {assessmentMessage && (
+              <div
+                className={`rounded-md border px-3 py-2 text-xs ${
+                  assessmentMessage.type === 'success'
+                    ? 'border-green-200 bg-green-50 text-green-700'
+                    : 'border-red-200 bg-red-50 text-red-700'
+                }`}
+              >
+                {assessmentMessage.text}
+              </div>
+            )}
+            {assessmentFormOpen && (
+              <form onSubmit={handleAssessmentSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="assessment-platform">Platform</Label>
+                  <Input
+                    id="assessment-platform"
+                    value={assessmentForm.platform}
+                    onChange={handleAssessmentFieldChange('platform')}
+                    placeholder="e.g., HackerRank, Codility"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="assessment-type">Assessment type</Label>
+                    <select
+                      id="assessment-type"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={assessmentForm.type}
+                      onChange={handleAssessmentFieldChange('type')}
+                    >
+                      <option value="technical">Technical</option>
+                      <option value="coding">Coding</option>
+                      <option value="behavioral">Behavioral</option>
+                      <option value="take_home">Take-home</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="assessment-due">Due date</Label>
+                    <Input
+                      id="assessment-due"
+                      type="datetime-local"
+                      value={assessmentForm.dueDate}
+                      onChange={handleAssessmentFieldChange('dueDate')}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="assessment-notes">Notes (optional)</Label>
+                  <Textarea
+                    id="assessment-notes"
+                    value={assessmentForm.notes}
+                    onChange={handleAssessmentFieldChange('notes')}
+                    rows={2}
+                    placeholder="Add expectations or follow-up details..."
+                  />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={resetAssessmentForm}
+                    disabled={createAssessment.isPending}
+                  >
+                    Reset
+                  </Button>
+                  <Button type="submit" disabled={createAssessment.isPending}>
+                    {createAssessment.isPending ? 'Saving...' : 'Save Assessment'}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+        <Card className="p-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Interview Timeline</h3>
+            <p className="text-sm text-muted-foreground">
+              Review recent and upcoming interviews attached to this candidate.
+            </p>
+          </div>
+          {candidateInterviewsLoading || candidateInterviewsRefetching ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              Loading interviews...
+            </div>
+          ) : candidateInterviews.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              No interviews logged yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {candidateInterviews.map((interview) => (
+                <div key={interview.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {interview.company_name || 'Company not set'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatLabel(interview.interview_type)} - Round {interview.round_number || 1}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium text-primary">
+                      {formatDateTime(interview.scheduled_date)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>{formatLabel(interview.status)}</span>
+                    <span>{interview.timezone || 'UTC'}</span>
+                  </div>
+                  {interview.notes ? (
+                    <p className="mt-2 text-xs text-muted-foreground">{interview.notes}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+        <Card className="p-6 space-y-4">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Assessment Tracker</h3>
+            <p className="text-sm text-muted-foreground">
+              Monitor outstanding assessments and due dates.
+            </p>
+          </div>
+          {candidateAssessmentsLoading || candidateAssessmentsRefetching ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              Loading assessments...
+            </div>
+          ) : candidateAssessments.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+              No assessments logged yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {candidateAssessments.map((assessment) => (
+                <div key={assessment.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {assessment.assessment_platform || 'Platform not set'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatLabel(assessment.assessment_type)}
+                      </p>
+                    </div>
+                    <span className="text-xs font-medium text-primary">
+                      Due {formatDate(assessment.due_date)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <span>{formatLabel(assessment.status)}</span>
+                  </div>
+                  {assessment.notes ? (
+                    <p className="mt-2 text-xs text-muted-foreground">{assessment.notes}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
 
@@ -672,6 +1215,7 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
   </div>
 );
 export default CandidateDetailPage;
+
 
 
 

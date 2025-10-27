@@ -106,6 +106,54 @@ export const useAssessmentsQuery = (token, params = {}, enabled = true) =>
     placeholderData: [],
   });
 
+export const useCreateInterviewMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await fetch(`${API_URL}/api/v1/interviews`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to log interview.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'interviews',
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useCreateAssessmentMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await fetch(`${API_URL}/api/v1/assessments`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to log assessment.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'assessments',
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
 export const useLogApplicationMutation = (token, options = {}) => {
   const queryClient = useQueryClient();
 
