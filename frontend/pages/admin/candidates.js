@@ -99,8 +99,14 @@ const AdminCandidates = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (candidatesRes.status === 401 || candidatesRes.status === 403) {
+      if (candidatesRes.status === 401) {
         router.push('/login');
+        return;
+      }
+
+      if (candidatesRes.status === 403) {
+        setError('You do not have permission to view this candidate list.');
+        setLoading(false);
         return;
       }
 
@@ -160,7 +166,8 @@ const AdminCandidates = () => {
   }, [candidates]);
 
   const handleCandidateSave = async (formData, resetForm) => {
-    if (!token) {
+    const authToken = token || localStorage.getItem('token');
+    if (!authToken) {
       router.push('/login');
       return;
     }
@@ -183,7 +190,7 @@ const AdminCandidates = () => {
       const response = await fetch(`${API_URL}${endpoint}`, {
         method,
         headers: {
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -210,7 +217,8 @@ const AdminCandidates = () => {
     const confirmed = window.confirm('Are you sure you want to delete this candidate? This action cannot be undone.');
     if (!confirmed) return;
 
-    if (!token) {
+    const authToken = token || localStorage.getItem('token');
+    if (!authToken) {
       router.push('/login');
       return;
     }
@@ -219,7 +227,7 @@ const AdminCandidates = () => {
       setError('');
       const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${authToken}` }
       });
 
       if (!response.ok) {
