@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   User,
+  Users,
   Briefcase,
   Target,
   TrendingUp,
@@ -14,6 +15,7 @@ import {
   MessageSquare,
   Lock,
   Bell,
+  Trash2,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card } from '../../../components/ui/card';
@@ -29,10 +31,13 @@ import {
   useCandidatesQuery,
   useCandidateNotesQuery,
   useCreateCandidateNoteMutation,
+  useUpdateCandidateNoteMutation,
+  useDeleteCandidateNoteMutation,
 } from '../../../lib/queryHooks';
 
 const sidebarLinks = [
   { href: '/recruiter', label: 'Dashboard', icon: Home },
+  { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
 ];
@@ -51,6 +56,8 @@ const CandidateDetailPage = () => {
   const { id } = router.query;
   const queryClient = useQueryClient();
   const [token, setToken] = useState('');
+  const [currentUserRole, setCurrentUserRole] = useState('');
+  const [currentUserId, setCurrentUserId] = useState(null);
   const [editing, setEditing] = useState(false);
   const [dailyApps, setDailyApps] = useState(0);
   const [totalApps, setTotalApps] = useState(0);
@@ -63,6 +70,7 @@ const CandidateDetailPage = () => {
   const [noteFollowUpDescription, setNoteFollowUpDescription] = useState('');
   const [noteFollowUpPriority, setNoteFollowUpPriority] = useState(1);
   const [noteMessage, setNoteMessage] = useState(null);
+  const [editingNoteId, setEditingNoteId] = useState(null);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -71,6 +79,15 @@ const CandidateDetailPage = () => {
       return;
     }
     setToken(storedToken);
+    const storedRole = localStorage.getItem('userRole');
+    if (storedRole) {
+      setCurrentUserRole(storedRole);
+    }
+    const storedUserId = localStorage.getItem('userId');
+    if (storedUserId) {
+      const parsedId = parseInt(storedUserId, 10);
+      setCurrentUserId(Number.isNaN(parsedId) ? null : parsedId);
+    }
   }, [router]);
 
   const candidateId = useMemo(() => {
@@ -98,21 +115,51 @@ const CandidateDetailPage = () => {
     isLoading: notesLoading,
   } = useCandidateNotesQuery(token, candidateId, Boolean(token && candidateId));
 
+  const resetNoteForm = (clearMessage = false) => {
+    setEditingNoteId(null);
+    setNoteContent('');
+    setNoteIsPrivate(false);
+    setNoteFollowUpEnabled(false);
+    setNoteFollowUpDueDate('');
+    setNoteFollowUpTitle('');
+    setNoteFollowUpDescription('');
+    setNoteFollowUpPriority(1);
+    if (clearMessage) {
+      setNoteMessage(null);
+    }
+  };
+
   const createNote = useCreateCandidateNoteMutation(token, candidateId, {
     onSuccess: () => {
       setNoteMessage({ type: 'success', text: 'Note added successfully.' });
-      setNoteContent('');
-      setNoteIsPrivate(false);
-      setNoteFollowUpEnabled(false);
-      setNoteFollowUpDueDate('');
-      setNoteFollowUpTitle('');
-      setNoteFollowUpDescription('');
-      setNoteFollowUpPriority(1);
+      resetNoteForm();
     },
     onError: (mutationError) => {
       setNoteMessage({ type: 'error', text: mutationError.message || 'Unable to add note.' });
     },
   });
+
+  const updateNote = useUpdateCandidateNoteMutation(token, candidateId, {
+    onSuccess: () => {
+      setNoteMessage({ type: 'success', text: 'Note updated successfully.' });
+      resetNoteForm();
+    },
+    onError: (mutationError) => {
+      setNoteMessage({ type: 'error', text: mutationError.message || 'Unable to update note.' });
+    },
+  });
+
+  const deleteNote = useDeleteCandidateNoteMutation(token, candidateId, {
+    onSuccess: () => {
+      setNoteMessage({ type: 'success', text: 'Note deleted successfully.' });
+      resetNoteForm();
+    },
+    onError: (mutationError) => {
+      setNoteMessage({ type: 'error', text: mutationError.message || 'Unable to delete note.' });
+    },
+  });
+
+  const noteActionsDisabled = updateNote.isPending || deleteNote.isPending;
 
   const handleSave = async () => {
     try {
@@ -174,7 +221,48 @@ const CandidateDetailPage = () => {
       };
     }
 
-    createNote.mutate(payload);
+    if (editingNoteId) {
+      updateNote.mutate({ noteId: editingNoteId, payload });
+    } else {
+      createNote.mutate(payload);
+    }
+  };
+
+  const toDateTimeLocal = (value) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const tzOffset = date.getTimezoneOffset();
+    const localISO = new Date(date.getTime() - tzOffset * 60000).toISOString().slice(0, 16);
+    return localISO;
+  };
+
+  const handleEditNote = (note) => {
+    setEditingNoteId(note.id);
+    setNoteContent(note.content || '');
+    setNoteIsPrivate(Boolean(note.isPrivate));
+    if (note.reminder) {
+      setNoteFollowUpEnabled(true);
+      setNoteFollowUpDueDate(toDateTimeLocal(note.reminder.dueDate));
+      setNoteFollowUpTitle(note.reminder.title || '');
+      setNoteFollowUpDescription(note.reminder.description || '');
+      setNoteFollowUpPriority(note.reminder.priority || 1);
+    } else {
+      setNoteFollowUpEnabled(false);
+      setNoteFollowUpDueDate('');
+      setNoteFollowUpTitle('');
+      setNoteFollowUpDescription('');
+      setNoteFollowUpPriority(1);
+    }
+    if (noteMessage) {
+      setNoteMessage(null);
+    }
+  };
+
+  const handleDeleteNote = (noteId) => {
+    const confirmDelete = window.confirm('Are you sure you want to delete this note?');
+    if (!confirmDelete) return;
+    deleteNote.mutate(noteId);
   };
 
   const formatDateTime = (value) => {
@@ -441,20 +529,25 @@ const CandidateDetailPage = () => {
           )}
 
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => {
-              setNoteContent('');
-              setNoteIsPrivate(false);
-              setNoteFollowUpEnabled(false);
-              setNoteFollowUpDueDate('');
-              setNoteFollowUpTitle('');
-              setNoteFollowUpDescription('');
-              setNoteFollowUpPriority(1);
-              setNoteMessage(null);
-            }}>
-              Clear
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => resetNoteForm(true)}
+              disabled={createNote.isPending || updateNote.isPending}
+            >
+              {editingNoteId ? 'Cancel' : 'Clear'}
             </Button>
-            <Button type="submit" disabled={createNote.isPending}>
-              {createNote.isPending ? 'Saving...' : 'Add Note'}
+            <Button
+              type="submit"
+              disabled={createNote.isPending || updateNote.isPending}
+            >
+              {editingNoteId
+                ? updateNote.isPending
+                  ? 'Updating...'
+                  : 'Update Note'
+                : createNote.isPending
+                  ? 'Saving...'
+                  : 'Add Note'}
             </Button>
           </div>
         </form>
@@ -468,9 +561,22 @@ const CandidateDetailPage = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {notes.map((note) => (
-                <NoteItem key={note.id} note={note} formatDateTime={formatDateTime} />
-              ))}
+              {notes.map((note) => {
+                const canModify = currentUserRole === 'Admin' || note.author?.id === currentUserId;
+                return (
+                  <NoteItem
+                    key={note.id}
+                    note={note}
+                    formatDateTime={formatDateTime}
+                    canEdit={canModify}
+                    canDelete={canModify}
+                    onEdit={() => handleEditNote(note)}
+                    onDelete={() => handleDeleteNote(note.id)}
+                    isEditing={editingNoteId === note.id}
+                    actionsDisabled={noteActionsDisabled}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
@@ -499,7 +605,7 @@ const StatBadge = ({ label, value, suffix = '', tone }) => (
   </div>
 );
 
-const NoteItem = ({ note, formatDateTime }) => (
+const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, isEditing, actionsDisabled }) => (
   <div className="rounded-lg border border-border bg-card/60 p-4 shadow-sm">
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-3">
@@ -515,12 +621,38 @@ const NoteItem = ({ note, formatDateTime }) => (
                 Private
               </span>
             )}
+            {isEditing && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                <Edit className="h-3 w-3" />
+                Editing
+              </span>
+            )}
           </p>
           <p className="text-xs text-muted-foreground">
             {formatDateTime(note.createdAt)} - {note.author?.role ?? 'Contributor'}
           </p>
         </div>
       </div>
+      {(canEdit || canDelete) && (
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <Button variant="ghost" size="icon" onClick={onEdit} aria-label="Edit note" disabled={actionsDisabled}>
+              <Edit className="h-4 w-4" />
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onDelete}
+              aria-label="Delete note"
+              disabled={actionsDisabled}
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
+        </div>
+      )}
     </div>
     <p className="mt-3 text-sm leading-relaxed text-foreground">{note.content}</p>
 

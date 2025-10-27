@@ -305,6 +305,21 @@ async function setupDatabase() {
       SET applications_count = 1
       WHERE applications_count IS NULL
     `);
+
+    await pool.query(`
+      ALTER TABLE reminders
+      ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL
+    `);
+
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE
+    `);
+
+    await pool.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITHOUT TIME ZONE
+    `);
   } catch (error) {
     console.error('Database setup error:', error.message);
   }
@@ -321,6 +336,18 @@ const verifyToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, SECRET_KEY);
     req.user = decoded;
+    pool
+      .query(
+        `
+          UPDATE users
+          SET last_active_at = CURRENT_TIMESTAMP
+          WHERE id = $1
+        `,
+        [decoded.userId]
+      )
+      .catch((activityError) => {
+        console.error('Failed to update last_active_at:', activityError.message);
+      });
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });
@@ -382,6 +409,16 @@ app.post('/api/v1/auth/login', async (req, res) => {
     }
 
     const token = jwt.sign({ userId: user.id, role: user.role }, SECRET_KEY, { expiresIn: '1d' });
+
+    await pool.query(
+      `
+        UPDATE users
+        SET last_login_at = CURRENT_TIMESTAMP,
+            last_active_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+      [user.id]
+    );
 
     res.json({ token, role: user.role, name: user.name, id: user.id });
 
@@ -808,6 +845,183 @@ app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
       return res.status(error.statusCode).json({ message: error.message });
     }
     console.error('Error creating note:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.put('/api/v1/candidates/:candidateId/notes/:noteId', verifyToken, async (req, res) => {
+  try {
+    const candidateId = parseInt(req.params.candidateId, 10);
+    const noteId = parseInt(req.params.noteId, 10);
+
+    if (Number.isNaN(candidateId) || Number.isNaN(noteId)) {
+      return res.status(400).json({ message: 'Invalid candidate or note id' });
+    }
+
+    const candidate = await fetchCandidateWithAccess(candidateId, req.user);
+
+    const noteResult = await pool.query(
+      `
+        SELECT n.id, n.candidate_id, n.author_id, n.content, n.is_private, n.created_at,
+               u.name AS author_name, u.role AS author_role
+        FROM notes n
+        JOIN users u ON n.author_id = u.id
+        WHERE n.id = $1
+      `,
+      [noteId]
+    );
+
+    if (noteResult.rows.length === 0 || noteResult.rows[0].candidate_id !== candidateId) {
+      return res.status(404).json({ message: 'Note not found for this candidate.' });
+    }
+
+    const existingNote = noteResult.rows[0];
+    const isAdmin = req.user.role === 'Admin';
+    if (!isAdmin && existingNote.author_id !== req.user.userId) {
+      return res.status(403).json({ message: 'You do not have permission to edit this note.' });
+    }
+
+    const { content, isPrivate = existingNote.is_private, followUp } = req.body;
+    const trimmedContent = (content || '').trim();
+    if (!trimmedContent) {
+      return res.status(400).json({ message: 'Note content is required.' });
+    }
+
+    const updatedNoteResult = await pool.query(
+      `
+        UPDATE notes
+        SET content = $1, is_private = $2
+        WHERE id = $3
+        RETURNING id, candidate_id, author_id, content, is_private, created_at
+      `,
+      [trimmedContent, Boolean(isPrivate), noteId]
+    );
+
+    const updatedNote = updatedNoteResult.rows[0];
+
+    const reminderResult = await pool.query(
+      `
+        SELECT id, user_id, title, description, due_date, status, priority
+        FROM reminders
+        WHERE note_id = $1
+      `,
+      [noteId]
+    );
+
+    let reminder = reminderResult.rows[0] || null;
+
+    if (followUp?.dueDate) {
+      const dueDate = new Date(followUp.dueDate);
+      if (Number.isNaN(dueDate.getTime())) {
+        return res.status(400).json({ message: 'Invalid follow-up due date.' });
+      }
+
+      const reminderUserId =
+        followUp.assigneeId || candidate.assigned_recruiter_id || req.user.userId;
+      const reminderTitle =
+        (followUp.title || `Follow up with ${candidate.name}`).trim() || `Follow up with ${candidate.name}`;
+      const reminderDescription = (followUp.description || trimmedContent).trim();
+      const reminderPriority = Number.isFinite(followUp.priority)
+        ? Math.max(1, Math.min(5, Math.floor(followUp.priority)))
+        : (reminder?.priority || 1);
+
+      if (reminder) {
+        const updatedReminder = await pool.query(
+          `
+            UPDATE reminders
+            SET user_id = $1, title = $2, description = $3, due_date = $4, priority = $5, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $6
+            RETURNING id, title, description, due_date, status, priority
+          `,
+          [reminderUserId, reminderTitle, reminderDescription, dueDate.toISOString(), reminderPriority, reminder.id]
+        );
+        reminder = updatedReminder.rows[0];
+      } else {
+        const createdReminder = await pool.query(
+          `
+            INSERT INTO reminders (user_id, note_id, title, description, due_date, priority)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, title, description, due_date, status, priority
+          `,
+          [reminderUserId, noteId, reminderTitle, reminderDescription, dueDate.toISOString(), reminderPriority]
+        );
+        reminder = createdReminder.rows[0];
+      }
+    } else if (reminder) {
+      await pool.query(`DELETE FROM reminders WHERE id = $1`, [reminder.id]);
+      reminder = null;
+    }
+
+    res.json({
+      id: updatedNote.id,
+      candidateId: updatedNote.candidate_id,
+      content: updatedNote.content,
+      isPrivate: updatedNote.is_private,
+      createdAt: updatedNote.created_at,
+      author: {
+        id: existingNote.author_id,
+        name: existingNote.author_name,
+        role: existingNote.author_role,
+      },
+      reminder: reminder
+        ? {
+            id: reminder.id,
+            title: reminder.title,
+            description: reminder.description,
+            dueDate: reminder.due_date,
+            status: reminder.status,
+            priority: reminder.priority,
+          }
+        : null,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error updating note:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.delete('/api/v1/candidates/:candidateId/notes/:noteId', verifyToken, async (req, res) => {
+  try {
+    const candidateId = parseInt(req.params.candidateId, 10);
+    const noteId = parseInt(req.params.noteId, 10);
+
+    if (Number.isNaN(candidateId) || Number.isNaN(noteId)) {
+      return res.status(400).json({ message: 'Invalid candidate or note id' });
+    }
+
+    await fetchCandidateWithAccess(candidateId, req.user);
+
+    const noteResult = await pool.query(
+      `
+        SELECT id, candidate_id, author_id
+        FROM notes
+        WHERE id = $1
+      `,
+      [noteId]
+    );
+
+    if (noteResult.rows.length === 0 || noteResult.rows[0].candidate_id !== candidateId) {
+      return res.status(404).json({ message: 'Note not found for this candidate.' });
+    }
+
+    const existingNote = noteResult.rows[0];
+    const isAdmin = req.user.role === 'Admin';
+    if (!isAdmin && existingNote.author_id !== req.user.userId) {
+      return res.status(403).json({ message: 'You do not have permission to delete this note.' });
+    }
+
+    await pool.query(`DELETE FROM reminders WHERE note_id = $1`, [noteId]);
+    await pool.query(`DELETE FROM notes WHERE id = $1`, [noteId]);
+
+    res.status(204).send();
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error('Error deleting note:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1345,7 +1559,12 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
 
 app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
-    const [notesResult, remindersResult] = await Promise.all([
+    const [
+      notesResult,
+      remindersResult,
+      recruiterNotesResult,
+      notesByRecruiterResult,
+    ] = await Promise.all([
       pool.query(
         `
           SELECT
@@ -1387,6 +1606,42 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
           LIMIT 15
         `
       ),
+      pool.query(
+        `
+          SELECT
+            n.id,
+            n.candidate_id,
+            COALESCE(c.name, 'Unassigned') AS candidate_name,
+            n.content,
+            n.is_private,
+            n.created_at,
+            u.id AS author_id,
+            u.name AS author_name,
+            u.role AS author_role
+          FROM notes n
+          JOIN users u ON n.author_id = u.id
+          LEFT JOIN candidates c ON n.candidate_id = c.id
+          WHERE u.role = 'Recruiter'
+          ORDER BY n.created_at DESC
+          LIMIT 100
+        `
+      ),
+      pool.query(
+        `
+          SELECT
+            u.id,
+            u.name,
+            u.daily_quota,
+            COUNT(n.id)::int AS total_notes,
+            COUNT(*) FILTER (WHERE n.created_at >= NOW() - INTERVAL '7 days')::int AS notes_last_7_days,
+            MAX(n.created_at) AS last_note_at
+          FROM users u
+          LEFT JOIN notes n ON n.author_id = u.id
+          WHERE u.role = 'Recruiter'
+          GROUP BY u.id, u.name, u.daily_quota
+          ORDER BY total_notes DESC, u.name ASC
+        `
+      ),
     ]);
 
     const recentNotes = notesResult.rows.map((row) => ({
@@ -1422,7 +1677,30 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
         : null,
     }));
 
-    res.json({ recentNotes, upcomingReminders });
+    const recruiterNotes = recruiterNotesResult.rows.map((row) => ({
+      id: row.id,
+      candidateId: row.candidate_id,
+      candidateName: row.candidate_name,
+      content: row.content,
+      isPrivate: row.is_private,
+      createdAt: row.created_at,
+      author: {
+        id: row.author_id,
+        name: row.author_name,
+        role: row.author_role,
+      },
+    }));
+
+    const notesByRecruiter = notesByRecruiterResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      dailyQuota: Number(row.daily_quota) || 0,
+      totalNotes: Number(row.total_notes) || 0,
+      notesLast7Days: Number(row.notes_last_7_days) || 0,
+      lastNoteAt: row.last_note_at,
+    }));
+
+    res.json({ recentNotes, upcomingReminders, recruiterNotes, notesByRecruiter });
   } catch (error) {
     console.error('Error fetching activity feed:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -1610,6 +1888,54 @@ app.patch('/api/v1/alerts/:id/resolve', verifyToken, async (req, res) => {
 });
 
 // User management endpoints
+app.get('/api/v1/users/activity', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+        SELECT
+          u.id,
+          u.name,
+          u.email,
+          u.role,
+          u.daily_quota,
+          u.last_login_at,
+          u.last_active_at,
+          COUNT(n.id)::int AS total_notes,
+          COUNT(*) FILTER (WHERE n.created_at >= NOW() - INTERVAL '7 days')::int AS notes_last_7_days
+        FROM users u
+        LEFT JOIN notes n ON n.author_id = u.id
+        GROUP BY u.id, u.name, u.email, u.role, u.daily_quota, u.last_login_at, u.last_active_at
+        ORDER BY u.role, u.name
+      `
+    );
+
+    const now = Date.now();
+
+    const users = result.rows.map((row) => {
+      const lastActiveAt = row.last_active_at ? new Date(row.last_active_at) : null;
+      const isOnline = lastActiveAt ? now - lastActiveAt.getTime() <= 5 * 60 * 1000 : false;
+
+      return {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        role: row.role,
+        dailyQuota: Number(row.daily_quota) || 0,
+        lastLoginAt: row.last_login_at,
+        lastActiveAt: row.last_active_at,
+        isOnline,
+        totalNotes: Number(row.total_notes) || 0,
+        notesLast7Days: Number(row.notes_last_7_days) || 0,
+      };
+    });
+
+    res.json({ users, generatedAt: new Date().toISOString() });
+  } catch (error) {
+    console.error('Error fetching user activity:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 app.get('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -1792,6 +2118,8 @@ async function startServer() {
     console.log('    PUT  /api/v1/candidates/:id - Update candidate (requires auth)');
     console.log('    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)');
     console.log('    POST /api/v1/candidates/:id/notes - Create note (requires auth)');
+    console.log('    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)');
+    console.log('    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)');
     console.log('  Applications:');
     console.log('    GET  /api/v1/applications - Get applications (requires auth)');
     console.log('    POST /api/v1/applications - Create application (requires auth)');
@@ -1810,6 +2138,7 @@ async function startServer() {
     console.log('  Alerts:');
     console.log('    GET  /api/v1/alerts - Get alerts (requires auth)');
     console.log('  Users (Admin only):');
+    console.log('    GET  /api/v1/users/activity - User activity (requires admin)');
     console.log('    GET  /api/v1/users - Get users (requires admin)');
     console.log('    POST /api/v1/users - Create user (requires admin)');
   });

@@ -32,6 +32,7 @@ export const queryKeys = {
   adminOverview: (token) => ['admin-overview', token],
   adminActivity: (token) => ['admin-activity', token],
   notifications: (token) => ['notifications', token],
+  userActivity: (token) => ['user-activity', token],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -167,6 +168,59 @@ export const useCreateCandidateNoteMutation = (token, candidateId, options = {})
   });
 };
 
+export const useUpdateCandidateNoteMutation = (token, candidateId, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ noteId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}/notes/${noteId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+
+      return handleResponse(response, 'Unable to update note.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.candidateNotes(token, candidateId),
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useDeleteCandidateNoteMutation = (token, candidateId, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (noteId) => {
+      const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}/notes/${noteId}`, {
+        method: 'DELETE',
+        headers: buildHeaders(token),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Unable to delete note.');
+      }
+      return true;
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.candidateNotes(token, candidateId),
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
 export const useAdminOverviewQuery = (token, enabled = true) =>
   useQuery({
     queryKey: queryKeys.adminOverview(token),
@@ -190,7 +244,13 @@ export const useAdminActivityQuery = (token, enabled = true) =>
       return handleResponse(response, 'Unable to load recent activity.');
     },
     enabled: Boolean(token) && enabled,
-    placeholderData: { recentNotes: [], upcomingReminders: [] },
+    placeholderData: {
+      recentNotes: [],
+      upcomingReminders: [],
+      recruiterNotes: [],
+      notesByRecruiter: [],
+    },
+    refetchInterval: 30000,
   });
 
 export const useNotificationsQuery = (token, enabled = true) =>
@@ -205,4 +265,18 @@ export const useNotificationsQuery = (token, enabled = true) =>
     enabled: Boolean(token) && enabled,
     placeholderData: { reminders: [], alerts: [] },
     refetchInterval: 15000,
+  });
+
+export const useUserActivityQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.userActivity(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/users/activity`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load user activity.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: { users: [], generatedAt: null },
+    refetchInterval: 30000,
   });

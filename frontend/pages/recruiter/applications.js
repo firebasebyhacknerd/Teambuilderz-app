@@ -105,6 +105,7 @@ const ApplicationsPage = () => {
 
     return [
       { href: '/recruiter', label: 'Dashboard', icon: Home },
+      { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
       { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
     ];

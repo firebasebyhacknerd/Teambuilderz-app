@@ -24,6 +24,7 @@ import {
   useAdminOverviewQuery,
   useAdminActivityQuery,
   useNotificationsQuery,
+  useUserActivityQuery,
 } from '../../lib/queryHooks';
 
 const numberFormatter = new Intl.NumberFormat();
@@ -59,6 +60,7 @@ const AdminDashboard = () => {
   const { data: overview, isLoading: overviewLoading } = useAdminOverviewQuery(token, Boolean(token));
   const { data: activity, isLoading: activityLoading } = useAdminActivityQuery(token, Boolean(token));
   const { data: notifications, isLoading: notificationsLoading } = useNotificationsQuery(token, Boolean(token));
+  const { data: userActivity, isLoading: userActivityLoading } = useUserActivityQuery(token, Boolean(token));
 
   const summary = overview?.summary ?? {
     totalCandidates: 0,
@@ -79,10 +81,23 @@ const AdminDashboard = () => {
 
   const recentNotes = activity?.recentNotes ?? [];
   const upcomingReminders = activity?.upcomingReminders ?? [];
+  const recruiterNotes = activity?.recruiterNotes ?? [];
+  const notesByRecruiter = activity?.notesByRecruiter ?? [];
   const centerReminders = notifications?.reminders ?? [];
   const centerAlerts = notifications?.alerts ?? [];
+  const usersWithStatus = userActivity?.users ?? [];
+  const userActivityGeneratedAt = userActivity?.generatedAt ?? null;
+  const totalRecruiterNotes = notesByRecruiter.reduce((sum, entry) => sum + (entry.totalNotes || 0), 0);
+  const totalNotesLastWeek = notesByRecruiter.reduce(
+    (sum, entry) => sum + (entry.notesLast7Days || 0),
+    0,
+  );
+  const userActivityTimestamp = userActivityGeneratedAt
+    ? dateTimeFormatter.format(new Date(userActivityGeneratedAt))
+    : null;
 
-  const isLoading = overviewLoading || activityLoading || notificationsLoading || !token;
+  const isLoading =
+    overviewLoading || activityLoading || notificationsLoading || userActivityLoading || !token;
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -186,7 +201,69 @@ const AdminDashboard = () => {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-8">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Team Presence
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {userActivityTimestamp
+                  ? `Updated ${userActivityTimestamp}`
+                  : 'Presence updates refresh automatically.'}
+              </p>
+            </div>
+          </div>
+          {usersWithStatus.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No users found.</p>
+          ) : (
+            <div className="space-y-2">
+              {usersWithStatus.slice(0, 10).map((user) => (
+                <UserPresenceRow key={user.id} user={user} />
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-emerald-600" />
+                Recruiter Notes Pulse
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Monitor collaboration volume and freshness across recruiters.
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <MetricTile
+              label="Total notes logged"
+              value={numberFormatter.format(totalRecruiterNotes)}
+              tone="bg-slate-100 text-slate-700"
+            />
+            <MetricTile
+              label="Notes logged (7 days)"
+              value={numberFormatter.format(totalNotesLastWeek)}
+              tone="bg-emerald-50 text-emerald-700"
+            />
+          </div>
+          {notesByRecruiter.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recruiter note activity recorded yet.</p>
+          ) : (
+            <div className="divide-y divide-border rounded-lg border border-border bg-card/50">
+              {notesByRecruiter.map((summary) => (
+                <NotesSummaryRow key={summary.id} summary={summary} />
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-8">
         <Card className="p-6 space-y-4">
           <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
             <MessageSquare className="h-5 w-5 text-primary" />
@@ -214,6 +291,25 @@ const AdminDashboard = () => {
             <div className="space-y-3">
               {upcomingReminders.map((reminder) => (
                 <ReminderItem key={reminder.id} reminder={reminder} />
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <ClipboardList className="h-5 w-5 text-primary" />
+            Recruiter Notes Feed
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Detailed log of recruiter-authored notes for performance reviews.
+          </p>
+          {recruiterNotes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No recruiter notes logged yet.</p>
+          ) : (
+            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+              {recruiterNotes.slice(0, 20).map((note) => (
+                <ActivityNoteItem key={note.id} note={note} />
               ))}
             </div>
           )}
@@ -318,6 +414,80 @@ const RecruiterListItem = ({ recruiter }) => {
         )}
       </div>
       <ChevronRight size={18} className="text-muted-foreground ml-4" />
+    </div>
+  );
+};
+
+const UserPresenceRow = ({ user }) => {
+  const lastActiveLabel = user.lastActiveAt
+    ? dateTimeFormatter.format(new Date(user.lastActiveAt))
+    : 'Never active';
+  const lastLoginLabel = user.lastLoginAt
+    ? dateTimeFormatter.format(new Date(user.lastLoginAt))
+    : 'Never logged in';
+  const statusClasses = user.isOnline ? 'bg-emerald-500' : 'bg-muted-foreground/60';
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-muted/40 px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className={`h-2.5 w-2.5 rounded-full ${statusClasses}`} />
+        <div>
+          <p className="text-sm font-semibold text-foreground">
+            {user.name}{' '}
+            <span className="text-xs text-muted-foreground">({user.role})</span>
+          </p>
+          <p className="text-xs text-muted-foreground">{user.email}</p>
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+        <span className={user.isOnline ? 'text-emerald-600 font-semibold' : ''}>
+          {user.isOnline ? 'Online now' : 'Offline'}
+        </span>
+        <span>Last active {lastActiveLabel}</span>
+        <span>Last login {lastLoginLabel}</span>
+        <span>
+          Notes 7d&nbsp;
+          <span className="font-semibold text-foreground">
+            {numberFormatter.format(user.notesLast7Days)}
+          </span>
+          &nbsp;/ total&nbsp;
+          <span className="font-semibold text-foreground">
+            {numberFormatter.format(user.totalNotes)}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const NotesSummaryRow = ({ summary }) => {
+  const lastNoteLabel = summary.lastNoteAt
+    ? dateTimeFormatter.format(new Date(summary.lastNoteAt))
+    : 'Never';
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3">
+      <div>
+        <p className="text-sm font-semibold text-foreground">{summary.name}</p>
+        <p className="text-xs text-muted-foreground">Last note {lastNoteLabel}</p>
+      </div>
+      <div className="flex items-center gap-3 text-xs sm:text-sm text-muted-foreground">
+        <span>
+          <span className="font-semibold text-foreground">
+            {numberFormatter.format(summary.totalNotes)}
+          </span>{' '}
+          total
+        </span>
+        <span>
+          <span className="font-semibold text-foreground">
+            {numberFormatter.format(summary.notesLast7Days)}
+          </span>{' '}
+          7d
+        </span>
+        {summary.dailyQuota ? (
+          <span>Quota {numberFormatter.format(summary.dailyQuota)}</span>
+        ) : null}
+      </div>
     </div>
   );
 };
