@@ -33,6 +33,7 @@ export const queryKeys = {
   adminActivity: (token) => ['admin-activity', token],
   notifications: (token) => ['notifications', token],
   userActivity: (token) => ['user-activity', token],
+  users: (token) => ['users', token],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -280,3 +281,92 @@ export const useUserActivityQuery = (token, enabled = true) =>
     placeholderData: { users: [], generatedAt: null },
     refetchInterval: 30000,
   });
+
+export const useUsersQuery = (token, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.users(token),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/users`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load users.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: [],
+    refetchInterval: 60000,
+  });
+
+export const useCreateUserMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await fetch(`${API_URL}/api/v1/users`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+
+      return handleResponse(response, 'Unable to create user.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.userActivity(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useUpdateUserMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ userId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/users/${userId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+
+      return handleResponse(response, 'Unable to update user.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.userActivity(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useDeleteUserMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (userId) => {
+      const response = await fetch(`${API_URL}/api/v1/users/${userId}`, {
+        method: 'DELETE',
+        headers: buildHeaders(token),
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Unable to delete user.');
+      }
+      return true;
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.userActivity(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};

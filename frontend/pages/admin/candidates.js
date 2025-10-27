@@ -43,6 +43,7 @@ const stages = Object.keys(stageBadges);
 const sidebarLinks = [
   { href: '/admin', label: 'Dashboard', icon: Home },
   { href: '/admin/candidates', label: 'Candidates', icon: Users },
+  { href: '/admin/recruiters', label: 'Team Management', icon: User },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
 ];

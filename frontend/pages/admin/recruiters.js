@@ -1,0 +1,525 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
+import {
+  Users,
+  Home,
+  FileText,
+  AlertTriangle,
+  LogOut,
+  UserCheck,
+  Trash2,
+  Save,
+} from 'lucide-react';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import {
+  useUsersQuery,
+  useCreateUserMutation,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
+} from '../../lib/queryHooks';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogClose,
+} from '../../components/ui/dialog';
+
+const AdminRecruitersPage = () => {
+  const router = useRouter();
+  const [token, setToken] = useState('');
+  const [userName, setUserName] = useState('Admin');
+  const [selectedUserId, setSelectedUserId] = useState(null);
+  const [formMessage, setFormMessage] = useState(null);
+  const [formState, setFormState] = useState({
+    name: '',
+    email: '',
+    dailyQuota: 60,
+    isActive: true,
+    password: '',
+  });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    dailyQuota: 60,
+  });
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedRole = localStorage.getItem('userRole');
+    if (!storedToken) {
+      router.push('/login');
+      return;
+    }
+    if (storedRole !== 'Admin') {
+      router.replace('/recruiter');
+      return;
+    }
+    setToken(storedToken);
+    const storedName = localStorage.getItem('userName');
+    if (storedName) {
+      setUserName(storedName);
+    }
+  }, [router]);
+
+  const { data: users = [], isLoading } = useUsersQuery(token, Boolean(token));
+
+  const recruiters = useMemo(
+    () => users.filter((user) => user.role === 'Recruiter'),
+    [users]
+  );
+
+  useEffect(() => {
+    if (!selectedUserId) {
+      setFormState({
+        name: '',
+        email: '',
+        dailyQuota: 60,
+        isActive: true,
+        password: '',
+      });
+      return;
+    }
+
+    const recruiter = recruiters.find((user) => user.id === selectedUserId);
+    if (!recruiter) {
+      setSelectedUserId(null);
+      return;
+    }
+
+    setFormState({
+      name: recruiter.name || '',
+      email: recruiter.email || '',
+      dailyQuota: recruiter.daily_quota ?? recruiter.dailyQuota ?? 60,
+      isActive: recruiter.is_active ?? recruiter.isActive ?? true,
+      password: '',
+    });
+  }, [recruiters, selectedUserId]);
+
+  const createUser = useCreateUserMutation(token, {
+    onSuccess: (data) => {
+      setFormMessage({ type: 'success', text: 'Recruiter added successfully.' });
+      setCreateOpen(false);
+      setCreateForm({
+        name: '',
+        email: '',
+        password: '',
+        dailyQuota: 60,
+      });
+      setSelectedUserId(data?.id ?? null);
+    },
+    onError: (error) => {
+      setFormMessage({ type: 'error', text: error.message || 'Failed to add recruiter.' });
+    },
+  });
+
+  const updateUser = useUpdateUserMutation(token, {
+    onSuccess: (_, variables) => {
+      setFormMessage({ type: 'success', text: 'Recruiter updated successfully.' });
+      setFormState((prev) => ({ ...prev, password: '' }));
+      if (variables?.payload?.is_active === false) {
+        // keep selection but highlight status update via message
+      }
+    },
+    onError: (error) => {
+      setFormMessage({ type: 'error', text: error.message || 'Failed to update recruiter.' });
+    },
+  });
+
+  const deleteUser = useDeleteUserMutation(token, {
+    onSuccess: () => {
+      setFormMessage({ type: 'success', text: 'Recruiter removed from the team.' });
+      setSelectedUserId(null);
+    },
+    onError: (error) => {
+      setFormMessage({ type: 'error', text: error.message || 'Unable to delete recruiter.' });
+    },
+  });
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userRole');
+    localStorage.removeItem('userName');
+    router.push('/login');
+  };
+
+  const sidebarLinks = [
+    { href: '/admin', label: 'Dashboard', icon: Home },
+    { href: '/admin/candidates', label: 'Candidates', icon: Users },
+    { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
+    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
+    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+  ];
+
+  const handleInputChange = (field, value) => {
+    setFormState((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    if (formMessage) {
+      setFormMessage(null);
+    }
+  };
+
+  const handleCreateChange = (field, value) => {
+    setCreateForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    if (formMessage) {
+      setFormMessage(null);
+    }
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (!selectedUserId) {
+      setFormMessage({ type: 'error', text: 'Please select a recruiter to update.' });
+      return;
+    }
+
+    const payload = {
+      name: formState.name,
+      email: formState.email,
+      daily_quota: Number(formState.dailyQuota) || 0,
+      is_active: Boolean(formState.isActive),
+    };
+
+    if (formState.password.trim()) {
+      payload.password = formState.password;
+    }
+
+    updateUser.mutate({
+      userId: selectedUserId,
+      payload,
+    });
+  };
+
+  const handleDelete = () => {
+    if (!selectedUserId) return;
+    const recruiter = recruiters.find((user) => user.id === selectedUserId);
+    const confirmed = window.confirm(
+      `Remove ${recruiter?.name ?? 'this recruiter'} from the team? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    deleteUser.mutate(selectedUserId);
+  };
+
+  const handleCreateSubmit = (event) => {
+    event.preventDefault();
+    if (!createForm.name.trim() || !createForm.email.trim() || !createForm.password.trim()) {
+      setFormMessage({ type: 'error', text: 'Name, email, and password are required.' });
+      return;
+    }
+
+    createUser.mutate({
+      name: createForm.name.trim(),
+      email: createForm.email.trim(),
+      password: createForm.password,
+      role: 'Recruiter',
+      daily_quota: Number(createForm.dailyQuota) || 0,
+    });
+  };
+
+  const isMutating = updateUser.isPending || deleteUser.isPending;
+  const isCreateMutating = createUser.isPending;
+
+  if (!token) {
+    return null;
+  }
+
+  return (
+    <DashboardLayout
+      title="Team Management"
+      subtitle={`Manage recruiter access and quotas - Signed in as ${userName}`}
+      links={sidebarLinks}
+      actions={
+        <Button variant="outline" size="sm" className="gap-2" onClick={handleLogout}>
+          <LogOut className="h-4 w-4" />
+          Logout
+        </Button>
+      }
+    >
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        <Card className="p-6 space-y-4 xl:col-span-1">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <Users className="h-5 w-5 text-primary" />
+                Recruiter Roster
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {recruiters.length} recruiters in the organisation.
+              </p>
+            </div>
+            <Dialog open={createOpen} onOpenChange={(open) => {
+              setCreateOpen(open);
+              if (open) {
+                setCreateForm({
+                  name: '',
+                  email: '',
+                  password: '',
+                  dailyQuota: 60,
+                });
+              }
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-2" variant="default">
+                  <UserCheck className="h-4 w-4" />
+                  Add Recruiter
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Add Recruiter</DialogTitle>
+                  <DialogDescription>
+                    Create a new recruiter account with the credentials below. Password can be rotated later.
+                  </DialogDescription>
+                </DialogHeader>
+                <form id="create-recruiter-form" className="space-y-4" onSubmit={handleCreateSubmit}>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-name">Name</Label>
+                    <Input
+                      id="create-name"
+                      value={createForm.name}
+                      onChange={(event) => handleCreateChange('name', event.target.value)}
+                      placeholder="Recruiter name"
+                      required
+                      disabled={isCreateMutating}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-email">Email</Label>
+                    <Input
+                      id="create-email"
+                      type="email"
+                      value={createForm.email}
+                      onChange={(event) => handleCreateChange('email', event.target.value)}
+                      placeholder="Recruiter email"
+                      required
+                      disabled={isCreateMutating}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-password">Temporary password</Label>
+                    <Input
+                      id="create-password"
+                      type="password"
+                      value={createForm.password}
+                      onChange={(event) => handleCreateChange('password', event.target.value)}
+                      placeholder="Provide a temporary password"
+                      required
+                      disabled={isCreateMutating}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="create-quota">Daily application quota</Label>
+                    <Input
+                      id="create-quota"
+                      type="number"
+                      value={createForm.dailyQuota}
+                      onChange={(event) => handleCreateChange('dailyQuota', event.target.value)}
+                      min={0}
+                      placeholder="60"
+                      required
+                      disabled={isCreateMutating}
+                    />
+                  </div>
+                </form>
+                <DialogFooter className="flex flex-col sm:flex-row sm:justify-end gap-2">
+                  <DialogClose asChild disabled={isCreateMutating}>
+                    <Button type="button" variant="outline">
+                      Cancel
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    type="submit"
+                    form="create-recruiter-form"
+                    disabled={isCreateMutating}
+                  >
+                    {isCreateMutating ? 'Creating...' : 'Create Recruiter'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
+          {isLoading ? (
+            <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
+              Loading team data...
+            </div>
+          ) : recruiters.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No recruiters found. Use the API to invite new teammates.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+              {recruiters.map((recruiter) => {
+                const isSelected = recruiter.id === selectedUserId;
+                const quota = recruiter.daily_quota ?? recruiter.dailyQuota ?? 0;
+                const statusTone = (recruiter.is_active ?? true)
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-slate-100 text-slate-700';
+
+                return (
+                  <button
+                    key={recruiter.id}
+                    type="button"
+                    onClick={() => setSelectedUserId(recruiter.id)}
+                    className={`w-full rounded-lg border px-4 py-3 text-left transition ${
+                      isSelected
+                        ? 'border-primary bg-primary/10 text-primary-foreground shadow-sm'
+                        : 'border-border bg-card/60 hover:bg-accent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{recruiter.name}</p>
+                        <p className="text-xs text-muted-foreground">{recruiter.email}</p>
+                      </div>
+                      <Badge className={statusTone} variant="secondary">
+                        {recruiter.is_active ?? true ? 'Active' : 'Inactive'}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground flex items-center gap-3">
+                      <span>Quota: {quota}</span>
+                      {recruiter.last_login_at && (
+                        <span>
+                          Last login:{' '}
+                          {new Date(recruiter.last_login_at).toLocaleDateString(undefined, {
+                            month: 'short',
+                            day: 'numeric',
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 space-y-4 xl:col-span-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-foreground flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-primary" />
+              {selectedUserId ? 'Edit Recruiter' : 'Select a recruiter to manage'}
+            </h3>
+            {selectedUserId && (
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={handleDelete}
+                  disabled={isMutating}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {formMessage && (
+            <div
+              className={`rounded-md border px-3 py-2 text-sm ${
+                formMessage.type === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-red-200 bg-red-50 text-red-700'
+              }`}
+            >
+              {formMessage.text}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="recruiter-name">Name</Label>
+                <Input
+                  id="recruiter-name"
+                  value={formState.name}
+                  onChange={(event) => handleInputChange('name', event.target.value)}
+                  placeholder="Recruiter name"
+                  disabled={!selectedUserId || isMutating}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="recruiter-email">Email</Label>
+                <Input
+                  id="recruiter-email"
+                  type="email"
+                  value={formState.email}
+                  onChange={(event) => handleInputChange('email', event.target.value)}
+                  placeholder="Recruiter email"
+                  disabled={!selectedUserId || isMutating}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="recruiter-quota">Daily application quota</Label>
+                <Input
+                  id="recruiter-quota"
+                  type="number"
+                  value={formState.dailyQuota}
+                  onChange={(event) => handleInputChange('dailyQuota', event.target.value)}
+                  placeholder="60"
+                  min={0}
+                  disabled={!selectedUserId || isMutating}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="recruiter-password">Reset password (optional)</Label>
+                <Input
+                  id="recruiter-password"
+                  type="password"
+                  value={formState.password}
+                  onChange={(event) => handleInputChange('password', event.target.value)}
+                  placeholder="Enter a new password to reset"
+                  disabled={!selectedUserId || isMutating}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="recruiter-status">Status</Label>
+                <select
+                  id="recruiter-status"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  value={formState.isActive ? 'active' : 'inactive'}
+                  onChange={(event) =>
+                    handleInputChange('isActive', event.target.value === 'active')
+                  }
+                  disabled={!selectedUserId || isMutating}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button type="submit" className="gap-2" disabled={!selectedUserId || isMutating}>
+                <Save className="h-4 w-4" />
+                {updateUser.isPending ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default AdminRecruitersPage;

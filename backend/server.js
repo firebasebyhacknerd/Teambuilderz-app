@@ -1969,6 +1969,107 @@ app.post('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) =>
   }
 });
 
+app.put('/api/v1/users/:id', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    const { name, email, role, daily_quota, is_active, password } = req.body;
+    const updates = [];
+    const params = [];
+    let idx = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${idx++}`);
+      params.push(name);
+    }
+    if (email !== undefined) {
+      updates.push(`email = $${idx++}`);
+      params.push(email);
+    }
+    if (role !== undefined) {
+      updates.push(`role = $${idx++}`);
+      params.push(role);
+    }
+    if (daily_quota !== undefined) {
+      updates.push(`daily_quota = $${idx++}`);
+      params.push(daily_quota);
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${idx++}`);
+      params.push(is_active);
+    }
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updates.push(`password_hash = $${idx++}`);
+      params.push(hashedPassword);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ message: 'No changes submitted.' });
+    }
+
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(userId);
+
+    const result = await pool.query(
+      `
+        UPDATE users
+        SET ${updates.join(', ')}
+        WHERE id = $${idx}
+        RETURNING id, name, email, role, daily_quota, is_active, last_login_at, last_active_at, created_at, updated_at
+      `,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ message: 'Email already in use.' });
+    }
+    console.error('Error updating user:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.delete('/api/v1/users/:id', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    if (userId === req.user.userId) {
+      return res.status(400).json({ message: 'You cannot delete your own account.' });
+    }
+
+    await pool.query(`UPDATE candidates SET assigned_recruiter_id = NULL WHERE assigned_recruiter_id = $1`, [userId]);
+    await pool.query(`UPDATE applications SET recruiter_id = NULL WHERE recruiter_id = $1`, [userId]);
+    await pool.query(`UPDATE interviews SET recruiter_id = NULL WHERE recruiter_id = $1`, [userId]);
+    await pool.query(`UPDATE assessments SET recruiter_id = NULL WHERE recruiter_id = $1`, [userId]);
+    await pool.query(`UPDATE notes SET author_id = NULL WHERE author_id = $1`, [userId]);
+    await pool.query(`UPDATE reminders SET user_id = NULL WHERE user_id = $1`, [userId]);
+    await pool.query(`UPDATE alerts SET user_id = NULL WHERE user_id = $1`, [userId]);
+
+    const result = await pool.query(`DELETE FROM users WHERE id = $1 RETURNING id`, [userId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    res.status(204).send();
+  } catch (error) {
+    console.error('Error deleting user:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
 // Automation and Alert Functions
 async function checkDailyQuotas() {
   try {
@@ -2141,8 +2242,9 @@ async function startServer() {
     console.log('    GET  /api/v1/users/activity - User activity (requires admin)');
     console.log('    GET  /api/v1/users - Get users (requires admin)');
     console.log('    POST /api/v1/users - Create user (requires admin)');
+    console.log('    PUT  /api/v1/users/:id - Update user (requires admin)');
+    console.log('    DELETE /api/v1/users/:id - Delete user (requires admin)');
   });
 }
 
 startServer();
-
