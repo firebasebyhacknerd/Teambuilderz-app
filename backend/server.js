@@ -1636,7 +1636,7 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
             COUNT(*)::int AS total_candidates,
             COUNT(*) FILTER (WHERE current_stage <> 'inactive')::int AS active_candidates,
             COUNT(*) FILTER (WHERE marketing_start_date IS NOT NULL)::int AS marketing_candidates,
-            COALESCE(AVG(EXTRACT(DAY FROM CURRENT_DATE - created_at)), 0)::numeric(10,2) AS avg_tenure_days
+            COALESCE(AVG((CURRENT_DATE - created_at::date)), 0)::numeric(10,2) AS avg_tenure_days
           FROM candidates
         `),
         pool.query(`
@@ -1654,7 +1654,7 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
               COALESCE(SUM(a.applications_count), 0) AS total_apps,
               CASE
                 WHEN MAX(a.application_date) IS NULL THEN NULL
-                ELSE EXTRACT(DAY FROM CURRENT_DATE - MAX(a.application_date))
+                ELSE (CURRENT_DATE - MAX(a.application_date))
               END AS days_since_last_app
             FROM candidates c
             LEFT JOIN applications a ON a.candidate_id = c.id

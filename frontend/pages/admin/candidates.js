@@ -471,6 +471,15 @@ const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, 
     current_stage: 'onboarding',
     assigned_recruiter_id: ''
   });
+  const { data: assignments = [], isLoading: assignmentsLoading } = useCandidateAssignmentsQuery(
+    token,
+    candidate?.id,
+    Boolean(token && open && candidate?.id),
+  );
+  const assignmentFormatter = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }),
+    [],
+  );
 
   useEffect(() => {
     if (candidate) {
