@@ -36,6 +36,8 @@ export const queryKeys = {
   users: (token) => ['users', token],
   leaderboard: (token) => ['leaderboard', token],
   candidateAssignments: (token, candidateId) => ['candidate-assignments', token, candidateId],
+  interviews: (token, params) => ['interviews', token, params ? JSON.stringify(params) : null],
+  assessments: (token, params) => ['assessments', token, params ? JSON.stringify(params) : null],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -59,6 +61,46 @@ export const useCandidatesQuery = (token, enabled = true) =>
         headers: buildHeaders(token),
       });
       return handleResponse(response, 'Unable to load candidates.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: [],
+  });
+
+const buildSearchParams = (params = {}) => {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const normalized = typeof value === 'string' ? value.trim() : value;
+    if (normalized === '' || Number.isNaN(normalized)) return;
+    searchParams.append(key, normalized);
+  });
+  const queryString = searchParams.toString();
+  return queryString ? `?${queryString}` : '';
+};
+
+export const useInterviewsQuery = (token, params = {}, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.interviews(token, params),
+    queryFn: async () => {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/interviews${query}`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load interviews.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: [],
+  });
+
+export const useAssessmentsQuery = (token, params = {}, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.assessments(token, params),
+    queryFn: async () => {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/assessments${query}`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load assessments.');
     },
     enabled: Boolean(token) && enabled,
     placeholderData: [],

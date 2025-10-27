@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -10,6 +10,8 @@ import {
   useApplicationsQuery,
   useCandidatesQuery,
   useLogApplicationMutation,
+  useInterviewsQuery,
+  useAssessmentsQuery,
 } from '../../lib/queryHooks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
@@ -28,6 +30,18 @@ const ApplicationsPage = () => {
     applicationsCount: 60,
     applicationDate: new Date().toISOString().split('T')[0],
     reductionReason: '',
+    includeInterview: false,
+    interviewCompany: '',
+    interviewDate: '',
+    interviewType: 'phone',
+    interviewRound: '1',
+    interviewTimezone: 'UTC',
+    interviewNotes: '',
+    includeAssessment: false,
+    assessmentPlatform: '',
+    assessmentType: 'technical',
+    assessmentDueDate: '',
+    assessmentNotes: '',
   });
 
   const [formValues, setFormValues] = useState(createDefaultFormValues);
@@ -46,6 +60,19 @@ const ApplicationsPage = () => {
     if (storedName) setUserName(storedName);
   }, [router]);
 
+  useEffect(() => {
+    if (typeof Intl === 'undefined') return;
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!timezone) return;
+
+    setFormValues((prev) => {
+      if (prev.interviewTimezone && prev.interviewTimezone !== 'UTC') {
+        return prev;
+      }
+      return { ...prev, interviewTimezone: timezone };
+    });
+  }, []);
+
   const {
     data: applications = [],
     isLoading: applicationsLoading,
@@ -56,6 +83,30 @@ const ApplicationsPage = () => {
     data: candidates = [],
     isLoading: candidatesLoading,
   } = useCandidatesQuery(token);
+
+  const today = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  const interviewQueryParams = useMemo(
+    () => ({ date_from: today, status: 'scheduled' }),
+    [today],
+  );
+
+  const assessmentQueryParams = useMemo(
+    () => ({ status: 'assigned' }),
+    [],
+  );
+
+  const {
+    data: interviews = [],
+    isLoading: interviewsLoading,
+    isRefetching: interviewsRefetching,
+  } = useInterviewsQuery(token, interviewQueryParams, Boolean(token));
+
+  const {
+    data: assessments = [],
+    isLoading: assessmentsLoading,
+    isRefetching: assessmentsRefetching,
+  } = useAssessmentsQuery(token, assessmentQueryParams, Boolean(token));
 
   const logApplication = useLogApplicationMutation(token, {
     onSuccess: () => {
@@ -124,9 +175,114 @@ const ApplicationsPage = () => {
     router.push(`/recruiter/candidate/${candidateId}`);
   };
 
+  const findCandidateById = (candidateId) => {
+    const numericId = Number(candidateId);
+    if (!numericId) return null;
+    return candidates.find((candidate) => candidate.id === numericId) || null;
+  };
+
+  const resolveInterviewCompany = (candidateId) => {
+    const candidate = findCandidateById(candidateId);
+    if (!candidate) return '';
+    return (
+      candidate.current_company ||
+      candidate.company ||
+      candidate.company_name ||
+      (candidate.name ? `${candidate.name} Interview` : '')
+    );
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return '--';
+    try {
+      return new Date(value).toLocaleString(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      });
+    } catch {
+      return value;
+    }
+  };
+
+  const formatDate = (value) => {
+    if (!value) return '--';
+    try {
+      return new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
+    } catch {
+      return value;
+    }
+  };
+
+  const formatLabel = (value) => {
+    if (!value) return '--';
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  };
+
   const handleFormChange = (field) => (event) => {
-    const value = event.target.value;
-    setFormValues((prev) => ({ ...prev, [field]: value }));
+    const { type, checked, value } = event.target;
+    const nextValue = type === 'checkbox' ? checked : value;
+
+    setFormValues((prev) => {
+      if (field === 'candidateId') {
+        const updated = { ...prev, candidateId: nextValue };
+
+        if (prev.includeInterview) {
+          const autoCompany = resolveInterviewCompany(nextValue);
+          const previousAutoCompany = resolveInterviewCompany(prev.candidateId);
+          if (!prev.interviewCompany || prev.interviewCompany === previousAutoCompany) {
+            updated.interviewCompany = autoCompany || prev.interviewCompany;
+          }
+        }
+
+        return updated;
+      }
+
+      if (field === 'includeInterview') {
+        if (nextValue) {
+          return {
+            ...prev,
+            includeInterview: true,
+            interviewCompany: prev.interviewCompany || resolveInterviewCompany(prev.candidateId),
+            interviewType: prev.interviewType || 'phone',
+            interviewRound: prev.interviewRound || '1',
+            interviewTimezone: prev.interviewTimezone || 'UTC',
+          };
+        }
+
+        return {
+          ...prev,
+          includeInterview: false,
+          interviewCompany: '',
+          interviewDate: '',
+          interviewType: 'phone',
+          interviewRound: '1',
+          interviewNotes: '',
+        };
+      }
+
+      if (field === 'includeAssessment') {
+        if (nextValue) {
+          return {
+            ...prev,
+            includeAssessment: true,
+            assessmentPlatform: prev.assessmentPlatform,
+            assessmentType: prev.assessmentType || 'technical',
+          };
+        }
+
+        return {
+          ...prev,
+          includeAssessment: false,
+          assessmentPlatform: '',
+          assessmentType: 'technical',
+          assessmentDueDate: '',
+          assessmentNotes: '',
+        };
+      }
+
+      return { ...prev, [field]: nextValue };
+    });
+
     if (formMessage) setFormMessage(null);
   };
 
@@ -136,7 +292,14 @@ const ApplicationsPage = () => {
   };
 
   const resetForm = () => {
-    setFormValues(createDefaultFormValues());
+    const defaults = createDefaultFormValues();
+    if (typeof Intl !== 'undefined') {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (timezone) {
+        defaults.interviewTimezone = timezone;
+      }
+    }
+    setFormValues(defaults);
     setFormMessage(null);
   };
 
@@ -165,6 +328,59 @@ const ApplicationsPage = () => {
     const candidateLabel = selectedCandidate?.name || 'General Application';
     const reason = formValues.reductionReason.trim();
 
+    const includeInterview = Boolean(formValues.includeInterview);
+    const includeAssessment = Boolean(formValues.includeAssessment);
+
+    const trimmedInterviewCompany = formValues.interviewCompany?.trim() || '';
+    const interviewRoundNumber = Number(formValues.interviewRound || 1);
+    const interviewTimezone = formValues.interviewTimezone?.trim() || 'UTC';
+    const trimmedAssessmentPlatform = formValues.assessmentPlatform?.trim() || '';
+    const assessmentType = formValues.assessmentType || 'technical';
+
+    if (includeInterview) {
+      if (!trimmedInterviewCompany) {
+        setFormMessage({
+          type: 'error',
+          text: 'Please add the interview company before logging.',
+        });
+        return;
+      }
+
+      if (!formValues.interviewDate) {
+        setFormMessage({
+          type: 'error',
+          text: 'Please provide the interview date and time before logging.',
+        });
+        return;
+      }
+
+      if (!Number.isFinite(interviewRoundNumber) || interviewRoundNumber < 1) {
+        setFormMessage({
+          type: 'error',
+          text: 'Interview round must be a positive number.',
+        });
+        return;
+      }
+    }
+
+    if (includeAssessment) {
+      if (!formValues.assessmentDueDate) {
+        setFormMessage({
+          type: 'error',
+          text: 'Please provide the assessment due date before logging.',
+        });
+        return;
+      }
+
+      if (!assessmentType) {
+        setFormMessage({
+          type: 'error',
+          text: 'Select an assessment type before logging.',
+        });
+        return;
+      }
+    }
+
     const applicationPayload = {
       candidate_id: Number(formValues.candidateId),
       company_name: `${candidateLabel} Outreach`,
@@ -176,12 +392,42 @@ const ApplicationsPage = () => {
       application_date: formValues.applicationDate || undefined,
     };
 
+    const interviewPayload = includeInterview
+      ? {
+          candidate_id: Number(formValues.candidateId),
+          company_name: trimmedInterviewCompany || `${candidateLabel} Interview`,
+          scheduled_date: formValues.interviewDate
+            ? new Date(formValues.interviewDate).toISOString()
+            : null,
+          interview_type: formValues.interviewType || 'phone',
+          round_number: Number.isFinite(interviewRoundNumber) && interviewRoundNumber > 0
+            ? interviewRoundNumber
+            : 1,
+          timezone: interviewTimezone || 'UTC',
+          status: 'scheduled',
+          notes: formValues.interviewNotes?.trim() || undefined,
+        }
+      : null;
+
+    const assessmentPayload = includeAssessment
+      ? {
+          candidate_id: Number(formValues.candidateId),
+          assessment_platform: trimmedAssessmentPlatform || 'General',
+          assessment_type: assessmentType,
+          due_date: formValues.assessmentDueDate
+            ? new Date(formValues.assessmentDueDate).toISOString()
+            : null,
+          status: 'assigned',
+          notes: formValues.assessmentNotes?.trim() || undefined,
+        }
+      : null;
+
     logApplication.mutate({
       application: applicationPayload,
-      includeInterview: false,
-      includeAssessment: false,
-      interview: null,
-      assessment: null,
+      includeInterview,
+      includeAssessment,
+      interview: interviewPayload,
+      assessment: assessmentPayload,
     });
   };
 
@@ -202,7 +448,7 @@ const ApplicationsPage = () => {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Log New Application</h2>
             <p className="text-sm text-muted-foreground">
-              Log today&apos;s outreach volume. Target is 60 applicationsâ€”add a quick note if you logged fewer.
+              Log today&apos;s outreach volume. Target is 60 applications—add a quick note if you logged fewer.
             </p>
           </div>
 
@@ -297,6 +543,132 @@ const ApplicationsPage = () => {
                   </p>
                 </div>
               )}
+
+              <div className="md:col-span-2 space-y-3 border-t border-border pt-4">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={formValues.includeInterview}
+                    onChange={handleFormChange('includeInterview')}
+                    className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
+                  />
+                  Log interview details
+                </label>
+                {formValues.includeInterview && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-foreground">Interview company</label>
+                      <Input
+                        value={formValues.interviewCompany}
+                        onChange={handleFormChange('interviewCompany')}
+                        placeholder="e.g., Acme Corp."
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Round</label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={formValues.interviewRound}
+                        onChange={handleFormChange('interviewRound')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Timezone</label>
+                      <Input
+                        value={formValues.interviewTimezone}
+                        onChange={handleFormChange('interviewTimezone')}
+                        placeholder="e.g., America/Chicago"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm font-medium text-foreground">Interview date & time</label>
+                      <Input
+                        type="datetime-local"
+                        value={formValues.interviewDate}
+                        onChange={handleFormChange('interviewDate')}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Interview type</label>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={formValues.interviewType}
+                        onChange={handleFormChange('interviewType')}
+                      >
+                        <option value="phone">Phone</option>
+                        <option value="video">Video</option>
+                        <option value="onsite">On-site</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2 md:col-span-4">
+                      <label className="text-sm font-medium text-foreground">Interview notes (optional)</label>
+                      <Textarea
+                        value={formValues.interviewNotes}
+                        onChange={handleFormChange('interviewNotes')}
+                        rows={2}
+                        placeholder="Share context or prep notes..."
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="md:col-span-2 space-y-3 border-t border-border pt-4">
+                <label className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={formValues.includeAssessment}
+                    onChange={handleFormChange('includeAssessment')}
+                    className="h-4 w-4 rounded border border-input text-primary focus:ring-primary"
+                  />
+                  Log assessment details
+                </label>
+                {formValues.includeAssessment && (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Assessment platform</label>
+                      <Input
+                        value={formValues.assessmentPlatform}
+                        onChange={handleFormChange('assessmentPlatform')}
+                        placeholder="e.g., HackerRank, Codility"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Assessment type</label>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={formValues.assessmentType}
+                        onChange={handleFormChange('assessmentType')}
+                      >
+                        <option value="technical">Technical</option>
+                        <option value="coding">Coding</option>
+                        <option value="behavioral">Behavioral</option>
+                        <option value="take_home">Take-home</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Due date</label>
+                      <Input
+                        type="datetime-local"
+                        value={formValues.assessmentDueDate}
+                        onChange={handleFormChange('assessmentDueDate')}
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-4">
+                      <label className="text-sm font-medium text-foreground">Assessment notes (optional)</label>
+                      <Textarea
+                        value={formValues.assessmentNotes}
+                        onChange={handleFormChange('assessmentNotes')}
+                        rows={2}
+                        placeholder="Share expectations or follow-up steps..."
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="flex justify-end gap-3 pt-2">
               <Button
@@ -350,6 +722,141 @@ const ApplicationsPage = () => {
             <SummaryCard label="Active Filters" value={statusFilter ? 1 : 0} />
           </div>
         </Card>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <Card className="p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Upcoming Interviews</h3>
+                <p className="text-sm text-muted-foreground">
+                  Keep track of scheduled conversations so nothing slips through.
+                </p>
+              </div>
+              {interviews.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Showing {Math.min(interviews.length, 5)} of {interviews.length}
+                </span>
+              )}
+            </div>
+            {interviewsLoading || interviewsRefetching ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                Loading interviews...
+              </div>
+            ) : interviews.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                No upcoming interviews logged yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {interviews.slice(0, 5).map((interview) => (
+                  <div
+                    key={interview.id}
+                    className="rounded-md border border-border bg-card/70 p-3 shadow-sm"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {interview.candidate_name || 'Candidate'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {interview.company_name || 'Company not set'}
+                        </p>
+                      </div>
+                      <span className="text-xs font-medium text-primary">
+                        {formatDateTime(interview.scheduled_date)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span>{formatLabel(interview.interview_type)}</span>
+                      <span>Round {interview.round_number || 1}</span>
+                      <span>{interview.timezone || 'UTC'}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => goToCandidate(interview.candidate_id)}
+                        className="text-xs"
+                      >
+                        View candidate
+                      </Button>
+                    </div>
+                    {interview.notes ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {interview.notes}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-6 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">Pending Assessments</h3>
+                <p className="text-sm text-muted-foreground">
+                  Track assessments awaiting completion or review.
+                </p>
+              </div>
+              {assessments.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Showing {Math.min(assessments.length, 5)} of {assessments.length}
+                </span>
+              )}
+            </div>
+            {assessmentsLoading || assessmentsRefetching ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                Loading assessments...
+              </div>
+            ) : assessments.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                No pending assessments logged yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {assessments.slice(0, 5).map((assessment) => (
+                  <div
+                    key={assessment.id}
+                    className="rounded-md border border-border bg-card/70 p-3 shadow-sm"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {assessment.candidate_name || 'Candidate'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {assessment.assessment_platform || 'Platform not set'}
+                        </p>
+                      </div>
+                      <span className="text-xs font-medium text-primary">
+                        Due {formatDate(assessment.due_date)}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                      <span>{formatLabel(assessment.assessment_type)}</span>
+                      <span>{formatLabel(assessment.status)}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => goToCandidate(assessment.candidate_id)}
+                        className="text-xs"
+                      >
+                        View candidate
+                      </Button>
+                    </div>
+                    {assessment.notes ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {assessment.notes}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
 
         <Card className="overflow-hidden">
           {applicationsLoading || candidatesLoading || applicationsRefetching ? (
