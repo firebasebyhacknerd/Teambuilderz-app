@@ -38,6 +38,7 @@ export const queryKeys = {
   candidateAssignments: (token, candidateId) => ['candidate-assignments', token, candidateId],
   interviews: (token, params) => ['interviews', token, params ? JSON.stringify(params) : null],
   assessments: (token, params) => ['assessments', token, params ? JSON.stringify(params) : null],
+  recruiterProfile: (token, userId) => ['recruiter-profile', token, userId],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -178,6 +179,31 @@ export const useUpdateInterviewMutation = (token, options = {}) => {
   });
 };
 
+export const useApproveInterviewMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ interviewId, approved = true }) => {
+      const response = await fetch(`${API_URL}/api/v1/interviews/${interviewId}/approval`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ approved }),
+      });
+      return handleResponse(response, 'Unable to update interview approval.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'interviews',
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
 export const useUpdateAssessmentMutation = (token, options = {}) => {
   const queryClient = useQueryClient();
 
@@ -202,6 +228,31 @@ export const useUpdateAssessmentMutation = (token, options = {}) => {
   });
 };
 
+export const useApproveAssessmentMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ assessmentId, approved = true }) => {
+      const response = await fetch(`${API_URL}/api/v1/assessments/${assessmentId}/approval`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ approved }),
+      });
+      return handleResponse(response, 'Unable to update assessment approval.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'assessments',
+      });
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
 export const useUpdateApplicationMutation = (token, options = {}) => {
   const queryClient = useQueryClient();
 
@@ -214,6 +265,53 @@ export const useUpdateApplicationMutation = (token, options = {}) => {
       });
 
       return handleResponse(response, 'Unable to update application.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useApproveApplicationMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ applicationId, approved = true }) => {
+      const response = await fetch(`${API_URL}/api/v1/applications/${applicationId}/approval`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify({ approved }),
+      });
+
+      return handleResponse(response, 'Unable to update application approval.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.applications(token) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.candidates(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useDeleteApplicationMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (applicationId) => {
+      const response = await fetch(`${API_URL}/api/v1/applications/${applicationId}`, {
+        method: 'DELETE',
+        headers: buildHeaders(token),
+      });
+
+      return handleResponse(response, 'Unable to delete application.');
     },
     onSuccess: (...args) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.applications(token) });
@@ -472,6 +570,19 @@ export const useCandidateAssignmentsQuery = (token, candidateId, enabled = true)
     enabled: Boolean(token) && Boolean(candidateId) && enabled,
     placeholderData: [],
     refetchInterval: 30000,
+  });
+
+export const useRecruiterProfileQuery = (token, userId, enabled = true) =>
+  useQuery({
+    queryKey: queryKeys.recruiterProfile(token, userId),
+    queryFn: async () => {
+      const response = await fetch(`${API_URL}/api/v1/users/${userId}/profile`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load recruiter profile.');
+    },
+    enabled: Boolean(token) && Boolean(userId) && enabled,
+    retry: false,
   });
 
 export const useUsersQuery = (token, enabled = true) =>

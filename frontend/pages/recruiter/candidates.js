@@ -86,6 +86,12 @@ const CandidatesPage = () => {
     router.push('/login');
   };
 
+  const handleRecruiterLinkClick = (event, recruiterId) => {
+    event.stopPropagation();
+    if (!recruiterId) return;
+    router.push(`/recruiter/profile/${recruiterId}`);
+  };
+
   return (
     <DashboardLayout
       title="My Candidates"
@@ -142,6 +148,17 @@ const CandidatesPage = () => {
                   <div>
                     <p className="text-sm font-semibold text-foreground">{candidate.name}</p>
                     <p className="text-xs text-muted-foreground">{candidate.email || 'No email on record'}</p>
+                    {candidate.assigned_recruiter_id ? (
+                      <button
+                        type="button"
+                        className="mt-1 text-xs text-primary hover:underline"
+                        onClick={(event) => handleRecruiterLinkClick(event, candidate.assigned_recruiter_id)}
+                      >
+                        Assigned to {candidate.recruiter_name || 'Recruiter'}
+                      </button>
+                    ) : (
+                      <p className="mt-1 text-xs text-muted-foreground">Unassigned</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 sm:gap-6">
                     <Badge className={badgeTone}>{stageLabel}</Badge>
@@ -149,11 +166,15 @@ const CandidatesPage = () => {
                       <span className="font-semibold text-foreground">
                         {candidate.daily_applications || 0}
                       </span>{' '}
-                      apps today &middot;{' '}
-                      <span className="font-semibold text-foreground">
-                        {candidate.total_applications || 0}
+                      today &middot;{' '}
+                      <span className="font-semibold text-emerald-600">
+                        {candidate.approved_applications || 0}
                       </span>{' '}
-                      total
+                      approved &middot;{' '}
+                      <span className="font-semibold text-amber-600">
+                        {candidate.pending_applications || 0}
+                      </span>{' '}
+                      pending
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>

@@ -6,6 +6,7 @@ import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import Textarea from '../../components/ui/textarea';
+import { Badge } from '../../components/ui/badge';
 import {
   useApplicationsQuery,
   useCandidatesQuery,
@@ -13,6 +14,8 @@ import {
   useInterviewsQuery,
   useAssessmentsQuery,
   useUpdateApplicationMutation,
+  useApproveApplicationMutation,
+  useDeleteApplicationMutation,
 } from '../../lib/queryHooks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
@@ -126,6 +129,34 @@ const ApplicationsPage = () => {
     },
   });
 
+  const approveApplication = useApproveApplicationMutation(token, {
+    onSuccess: () => {
+      setEditMessage({ type: 'success', text: 'Application approval updated.' });
+    },
+    onError: (error) => {
+      setEditMessage({
+        type: 'error',
+        text: error.message || 'Unable to update approval.',
+      });
+    },
+  });
+
+  const deleteApplication = useDeleteApplicationMutation(token, {
+    onSuccess: () => {
+      setEditMessage({ type: 'success', text: 'Application rejected and removed.' });
+      if (editingApplicationId) {
+        setEditingApplicationId(null);
+        setEditingApplicationsCount('');
+      }
+    },
+    onError: (error) => {
+      setEditMessage({
+        type: 'error',
+        text: error.message || 'Unable to reject application.',
+      });
+    },
+  });
+
   const logApplication = useLogApplicationMutation(token, {
     onSuccess: () => {
       setFormMessage({ type: 'success', text: 'Application logged successfully.' });
@@ -150,10 +181,23 @@ const ApplicationsPage = () => {
     });
   }, [applications, searchTerm, statusFilter]);
 
-  const totalApplications = filteredApplications.reduce(
-    (sum, app) => sum + (Number(app.applications_count) || 0),
-    0
-  );
+  const filteredApprovalSummary = useMemo(() => {
+    return filteredApplications.reduce(
+      (acc, app) => {
+        const count = Number(app.applications_count) || 0;
+        acc.total += count;
+        if (app.is_approved) {
+          acc.approved += count;
+          acc.approvedRecords += 1;
+        } else {
+          acc.pending += count;
+          acc.pendingRecords += 1;
+        }
+        return acc;
+      },
+      { total: 0, approved: 0, pending: 0, approvedRecords: 0, pendingRecords: 0 }
+    );
+  }, [filteredApplications]);
   const needsReductionReason = Number(formValues.applicationsCount || 0) < 60;
 
   useEffect(() => {
@@ -191,6 +235,11 @@ const ApplicationsPage = () => {
   const goToCandidate = (candidateId) => {
     if (!candidateId) return;
     router.push(`/recruiter/candidate/${candidateId}`);
+  };
+
+  const goToRecruiterProfile = (userId) => {
+    if (!userId) return;
+    router.push(`/recruiter/profile/${userId}`);
   };
 
   const findCandidateById = (candidateId) => {
@@ -333,6 +382,18 @@ const ApplicationsPage = () => {
     setEditingApplicationId(null);
     setEditingApplicationsCount('');
     setEditMessage(null);
+  };
+
+  const handleApproveApplication = (application) => {
+    if (!token || approveApplication.isPending) return;
+    setEditMessage(null);
+    approveApplication.mutate({ applicationId: application.id, approved: true });
+  };
+
+  const handleRejectApplication = (application) => {
+    if (!token || deleteApplication.isPending) return;
+    setEditMessage(null);
+    deleteApplication.mutate(application.id);
   };
 
   const handleSaveEdit = (applicationId) => {
@@ -771,10 +832,11 @@ const ApplicationsPage = () => {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <SummaryCard label="Filtered Applications" value={filteredApplications.length} />
-            <SummaryCard label="Total Count (Filtered)" value={totalApplications} />
-            <SummaryCard label="Active Filters" value={statusFilter ? 1 : 0} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <SummaryCard label="Filtered Records" value={filteredApplications.length} />
+            <SummaryCard label="Approved Total (Filtered)" value={filteredApprovalSummary.approved} />
+            <SummaryCard label="Pending Total (Filtered)" value={filteredApprovalSummary.pending} />
+            <SummaryCard label="Pending Records" value={filteredApprovalSummary.pendingRecords} />
           </div>
         </Card>
 
@@ -938,12 +1000,14 @@ const ApplicationsPage = () => {
                 <thead className="bg-muted/50 text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Candidate</th>
+                    <th className="px-4 py-3 text-left font-medium">Recruiter</th>
                     <th className="px-4 py-3 text-left font-medium">Company</th>
                     <th className="px-4 py-3 text-left font-medium">Job Title</th>
                     <th className="px-4 py-3 text-left font-medium">Channel</th>
                     <th className="px-4 py-3 text-left font-medium">Status</th>
                     <th className="px-4 py-3 text-left font-medium">Applied On</th>
                     <th className="px-4 py-3 text-right font-medium">Count</th>
+                    <th className="px-4 py-3 text-left font-medium">Approval</th>
                     <th className="px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
@@ -953,11 +1017,16 @@ const ApplicationsPage = () => {
                     const normalizedDate = application.application_date
                       ? new Date(application.application_date).toISOString().split('T')[0]
                       : null;
+                    const isApproved = Boolean(application.is_approved);
                     const canEdit =
-                      userRole === 'Admin' || (normalizedDate ? normalizedDate === today : true);
+                      userRole === 'Admin' ||
+                      (!isApproved && (normalizedDate ? normalizedDate === today : true));
+                    const approvalUpdating =
+                      approveApplication.isPending &&
+                      approveApplication.variables?.applicationId === application.id;
                     const rowClasses = `border-b border-border transition ${
                       isEditing ? 'bg-muted/30' : 'hover:bg-accent/60 cursor-pointer'
-                    }`;
+                    } ${isApproved ? '' : 'border-l-4 border-l-amber-400'}`;
 
                     return (
                       <tr
@@ -967,7 +1036,38 @@ const ApplicationsPage = () => {
                           !isEditing ? () => goToCandidate(application.candidate_id) : undefined
                         }
                       >
-                        <td className="px-4 py-3 text-foreground">{application.candidate_name || '--'}</td>
+                        <td className="px-4 py-3 text-foreground">
+                          {application.candidate_id ? (
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                goToCandidate(application.candidate_id);
+                              }}
+                            >
+                              {application.candidate_name || 'View candidate'}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">--</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-foreground">
+                          {application.recruiter_id ? (
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                goToRecruiterProfile(application.recruiter_id);
+                              }}
+                            >
+                              {application.recruiter_name || 'Recruiter'}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">--</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-foreground">{application.company_name || '--'}</td>
                         <td className="px-4 py-3 text-foreground">{application.job_title || '--'}</td>
                         <td className="px-4 py-3 capitalize text-muted-foreground">{application.channel || '--'}</td>
@@ -993,6 +1093,46 @@ const ApplicationsPage = () => {
                           ) : (
                             application.applications_count || 0
                           )}
+                        </td>
+                        <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        className={
+                          isApproved
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-100 text-amber-700 border border-amber-200'
+                        }
+                      >
+                        {isApproved ? 'Approved' : 'Pending'}
+                      </Badge>
+                      {userRole === 'Admin' && (
+                        <>
+                          <Button
+                            type="button"
+                            size="xs"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleApproveApplication(application);
+                            }}
+                            disabled={approvalUpdating || isApproved}
+                          >
+                            {approvalUpdating ? 'Updating...' : 'Approve'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="xs"
+                            variant="destructive"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleRejectApplication(application);
+                            }}
+                            disabled={deleteApplication.isPending}
+                          >
+                            {deleteApplication.isPending ? 'Deleting...' : 'Reject'}
+                          </Button>
+                        </>
+                      )}
+                    </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           {isEditing ? (
@@ -1044,7 +1184,9 @@ const ApplicationsPage = () => {
                               Edit
                             </Button>
                           ) : (
-                            <span className="text-xs text-muted-foreground">Locked</span>
+                            <span className="text-xs text-muted-foreground">
+                              {isApproved ? 'Locked (approved)' : 'Locked'}
+                            </span>
                           )}
                         </td>
                       </tr>

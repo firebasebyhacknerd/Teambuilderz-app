@@ -118,6 +118,9 @@ async function setupDatabase() {
           status application_status DEFAULT 'sent',
           application_date DATE DEFAULT CURRENT_DATE,
           applications_count INTEGER DEFAULT 1,
+          is_approved BOOLEAN DEFAULT false,
+          approved_by INTEGER REFERENCES users(id),
+          approved_at TIMESTAMP WITHOUT TIME ZONE,
           created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -138,6 +141,9 @@ async function setupDatabase() {
           status interview_status DEFAULT 'scheduled',
           feedback TEXT,
           feedback_files TEXT[],
+          is_approved BOOLEAN DEFAULT false,
+          approved_by INTEGER REFERENCES users(id),
+          approved_at TIMESTAMP WITHOUT TIME ZONE,
           created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -157,6 +163,9 @@ async function setupDatabase() {
           status assessment_status DEFAULT 'assigned',
           score DECIMAL(5,2),
           notes TEXT,
+          is_approved BOOLEAN DEFAULT false,
+          approved_by INTEGER REFERENCES users(id),
+          approved_at TIMESTAMP WITHOUT TIME ZONE,
           created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
@@ -314,13 +323,40 @@ async function setupDatabase() {
     // Ensure new columns exist for evolved schema
     await pool.query(`
       ALTER TABLE applications
-      ADD COLUMN IF NOT EXISTS applications_count INTEGER DEFAULT 1
+      ADD COLUMN IF NOT EXISTS applications_count INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
     `);
 
     await pool.query(`
       UPDATE applications
-      SET applications_count = 1
-      WHERE applications_count IS NULL
+      SET applications_count = COALESCE(applications_count, 1),
+          is_approved = COALESCE(is_approved, false)
+    `);
+
+    await pool.query(`
+      ALTER TABLE interviews
+      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
+    `);
+
+    await pool.query(`
+      UPDATE interviews
+      SET is_approved = COALESCE(is_approved, false)
+    `);
+
+    await pool.query(`
+      ALTER TABLE assessments
+      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
+    `);
+
+    await pool.query(`
+      UPDATE assessments
+      SET is_approved = COALESCE(is_approved, false)
     `);
 
     await pool.query(`
@@ -549,12 +585,46 @@ app.get('/api/v1/candidates', verifyToken, async (req, res) => {
   try {
     const { stage, recruiter_id, search } = req.query;
     let query = `
-      SELECT c.*, u.name as recruiter_name,
-             COALESCE(SUM(a.applications_count), 0) as total_applications,
-             COALESCE(SUM(CASE WHEN a.application_date = CURRENT_DATE THEN a.applications_count ELSE 0 END), 0) as daily_applications
+      SELECT
+        c.*,
+        u.name AS recruiter_name,
+        COALESCE(app_metrics.applications_total, 0) AS total_applications,
+        COALESCE(app_metrics.applications_daily, 0) AS daily_applications,
+        COALESCE(app_metrics.applications_approved, 0) AS approved_applications,
+        COALESCE(app_metrics.applications_pending, 0) AS pending_applications,
+        COALESCE(interview_metrics.total_interviews, 0) AS interviews_total,
+        COALESCE(interview_metrics.approved_interviews, 0) AS interviews_approved,
+        COALESCE(interview_metrics.pending_interviews, 0) AS interviews_pending,
+        COALESCE(assessment_metrics.total_assessments, 0) AS assessments_total,
+        COALESCE(assessment_metrics.approved_assessments, 0) AS assessments_approved,
+        COALESCE(assessment_metrics.pending_assessments, 0) AS assessments_pending
       FROM candidates c
       LEFT JOIN users u ON c.assigned_recruiter_id = u.id
-      LEFT JOIN applications a ON c.id = a.candidate_id
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(SUM(a.applications_count), 0) AS applications_total,
+          COALESCE(SUM(CASE WHEN a.application_date = CURRENT_DATE THEN a.applications_count ELSE 0 END), 0) AS applications_daily,
+          COALESCE(SUM(CASE WHEN COALESCE(a.is_approved, false) THEN a.applications_count ELSE 0 END), 0) AS applications_approved,
+          COALESCE(SUM(CASE WHEN COALESCE(a.is_approved, false) THEN 0 ELSE a.applications_count END), 0) AS applications_pending
+        FROM applications a
+        WHERE a.candidate_id = c.id
+      ) AS app_metrics ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS total_interviews,
+          COUNT(*) FILTER (WHERE COALESCE(i.is_approved, false)) AS approved_interviews,
+          COUNT(*) FILTER (WHERE NOT COALESCE(i.is_approved, false)) AS pending_interviews
+        FROM interviews i
+        WHERE i.candidate_id = c.id
+      ) AS interview_metrics ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COUNT(*) AS total_assessments,
+          COUNT(*) FILTER (WHERE COALESCE(s.is_approved, false)) AS approved_assessments,
+          COUNT(*) FILTER (WHERE NOT COALESCE(s.is_approved, false)) AS pending_assessments
+        FROM assessments s
+        WHERE s.candidate_id = c.id
+      ) AS assessment_metrics ON true
       WHERE 1=1
     `;
     const params = [];
@@ -581,7 +651,7 @@ app.get('/api/v1/candidates', verifyToken, async (req, res) => {
       params.push(`%${search}%`, `%${search}%`);
     }
 
-    query += ` GROUP BY c.id, u.name ORDER BY c.created_at DESC`;
+    query += ` ORDER BY c.created_at DESC`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -1369,6 +1439,9 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    const isAdmin = req.user.role === 'Admin';
+    const isApproved = Boolean(application.is_approved);
+
     const recruiterId = application.recruiter_id;
     const normalizeDate = (value) => {
       if (!value) return null;
@@ -1382,7 +1455,7 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     const applicationDate = application.application_date ? normalizeDate(application.application_date) : today;
 
-    if (req.user.role !== 'Admin' && applicationDate !== today) {
+    if (!isAdmin && applicationDate !== today) {
       return res.status(400).json({ message: 'Applications can only be modified on the day they are logged.' });
     }
 
@@ -1406,6 +1479,9 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
     }
 
     if (applications_count !== undefined) {
+      if (!isAdmin && isApproved) {
+        return res.status(403).json({ message: 'Approved application totals are locked. Contact an admin for changes.' });
+      }
       const parsedCount = Number(applications_count);
       if (!Number.isFinite(parsedCount) || parsedCount < 0 || !Number.isInteger(parsedCount)) {
         return res.status(400).json({ message: 'applications_count must be a non-negative integer.' });
@@ -1484,6 +1560,118 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
     res.json(updatedApplication);
   } catch (error) {
     console.error('Error updating application:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post('/api/v1/applications/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const applicationId = parseInt(req.params.id, 10);
+    if (Number.isNaN(applicationId)) {
+      return res.status(400).json({ message: 'Invalid application id' });
+    }
+
+    const existing = await pool.query('SELECT * FROM applications WHERE id = $1', [applicationId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
+
+    const shouldApprove = typeof req.body?.approved === 'boolean' ? req.body.approved : true;
+
+    const updated = await pool.query(
+      `
+      UPDATE applications
+      SET is_approved = $1,
+          approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+          approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3
+      RETURNING *
+    `,
+      [shouldApprove, req.user.userId, applicationId],
+    );
+
+    const updatedApplication = updated.rows[0];
+
+    await pool.query(
+      `
+      INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+      VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
+    `,
+      [req.user.userId, applicationId, JSON.stringify(existing.rows[0]), JSON.stringify(updatedApplication)],
+    );
+
+    res.json(updatedApplication);
+  } catch (error) {
+    console.error('Error updating application approval:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.delete('/api/v1/applications/:id', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const applicationId = parseInt(req.params.id, 10);
+    if (Number.isNaN(applicationId)) {
+      return res.status(400).json({ message: 'Invalid application id' });
+    }
+
+    const existing = await pool.query('SELECT * FROM applications WHERE id = $1', [applicationId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Application not found' });
+    }
+
+    const application = existing.rows[0];
+
+    await pool.query('DELETE FROM applications WHERE id = $1', [applicationId]);
+
+    if (application.recruiter_id) {
+      const date = application.application_date
+        ? new Date(application.application_date).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0];
+
+      const aggregate = await pool.query(
+        `
+          SELECT COALESCE(SUM(applications_count), 0) AS total
+          FROM applications
+          WHERE recruiter_id = $1 AND application_date = $2
+        `,
+        [application.recruiter_id, date],
+      );
+
+      const totalForDay = Number(aggregate.rows[0]?.total || 0);
+
+      if (totalForDay > 0) {
+        await pool.query(
+          `
+            INSERT INTO daily_activity (user_id, activity_date, applications_count)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, activity_date)
+            DO UPDATE SET applications_count = EXCLUDED.applications_count
+          `,
+          [application.recruiter_id, date, totalForDay],
+        );
+      } else {
+        await pool.query(
+          `
+            DELETE FROM daily_activity
+            WHERE user_id = $1 AND activity_date = $2
+          `,
+          [application.recruiter_id, date],
+        );
+      }
+    }
+
+    await pool.query(
+      `
+      INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values)
+      VALUES ($1, 'DELETE', 'applications', $2, $3)
+    `,
+      [req.user.userId, applicationId, JSON.stringify(application)],
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting application:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1569,8 +1757,26 @@ app.post('/api/v1/interviews', verifyToken, async (req, res) => {
 
 app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
   try {
-    const { id } = req.params;
+    const interviewId = parseInt(req.params.id, 10);
+    if (Number.isNaN(interviewId)) {
+      return res.status(400).json({ message: 'Invalid interview id.' });
+    }
     const { status, scheduled_date, round_number, timezone, notes } = req.body;
+
+    const existing = await pool.query('SELECT * FROM interviews WHERE id = $1', [interviewId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Interview not found.' });
+    }
+
+    const interview = existing.rows[0];
+    const isAdmin = req.user.role === 'Admin';
+    if (!isAdmin && interview.recruiter_id !== req.user.userId) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    if (!isAdmin && Boolean(interview.is_approved)) {
+      return res.status(403).json({ message: 'Approved interviews are locked. Contact an admin for changes.' });
+    }
 
     const updates = [];
     const params = [];
@@ -1613,7 +1819,7 @@ app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(id);
+    params.push(interviewId);
 
     const result = await pool.query(
       `
@@ -1632,6 +1838,50 @@ app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating interview:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post('/api/v1/interviews/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const interviewId = parseInt(req.params.id, 10);
+    if (Number.isNaN(interviewId)) {
+      return res.status(400).json({ message: 'Invalid interview id.' });
+    }
+
+    const existing = await pool.query('SELECT * FROM interviews WHERE id = $1', [interviewId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Interview not found.' });
+    }
+
+    const shouldApprove = typeof req.body?.approved === 'boolean' ? req.body.approved : true;
+
+    const updated = await pool.query(
+      `
+        UPDATE interviews
+        SET is_approved = $1,
+            approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+            approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `,
+      [shouldApprove, req.user.userId, interviewId],
+    );
+
+    const interview = updated.rows[0];
+
+    await pool.query(
+      `
+        INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+        VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+      `,
+      [req.user.userId, interviewId, JSON.stringify(existing.rows[0]), JSON.stringify(interview)],
+    );
+
+    res.json(interview);
+  } catch (error) {
+    console.error('Error updating interview approval:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -1711,8 +1961,26 @@ app.post('/api/v1/assessments', verifyToken, async (req, res) => {
 
 app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
   try {
-    const { id } = req.params;
+    const assessmentId = parseInt(req.params.id, 10);
+    if (Number.isNaN(assessmentId)) {
+      return res.status(400).json({ message: 'Invalid assessment id.' });
+    }
     const { status, due_date, score, notes } = req.body;
+
+    const existing = await pool.query('SELECT * FROM assessments WHERE id = $1', [assessmentId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Assessment not found.' });
+    }
+
+    const assessment = existing.rows[0];
+    const isAdmin = req.user.role === 'Admin';
+    if (!isAdmin && assessment.recruiter_id !== req.user.userId) {
+      return res.status(403).json({ message: 'Access denied.' });
+    }
+
+    if (!isAdmin && Boolean(assessment.is_approved)) {
+      return res.status(403).json({ message: 'Approved assessments are locked. Contact an admin for changes.' });
+    }
 
     const updates = [];
     const params = [];
@@ -1750,7 +2018,7 @@ app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');
-    params.push(id);
+    params.push(assessmentId);
 
     const result = await pool.query(
       `
@@ -1769,6 +2037,50 @@ app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Error updating assessment:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post('/api/v1/assessments/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const assessmentId = parseInt(req.params.id, 10);
+    if (Number.isNaN(assessmentId)) {
+      return res.status(400).json({ message: 'Invalid assessment id.' });
+    }
+
+    const existing = await pool.query('SELECT * FROM assessments WHERE id = $1', [assessmentId]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ message: 'Assessment not found.' });
+    }
+
+    const shouldApprove = typeof req.body?.approved === 'boolean' ? req.body.approved : true;
+
+    const updated = await pool.query(
+      `
+        UPDATE assessments
+        SET is_approved = $1,
+            approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+            approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+        RETURNING *
+      `,
+      [shouldApprove, req.user.userId, assessmentId],
+    );
+
+    const assessment = updated.rows[0];
+
+    await pool.query(
+      `
+        INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+        VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+      `,
+      [req.user.userId, assessmentId, JSON.stringify(existing.rows[0]), JSON.stringify(assessment)],
+    );
+
+    res.json(assessment);
+  } catch (error) {
+    console.error('Error updating assessment approval:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
@@ -2390,6 +2702,100 @@ app.get('/api/v1/users/activity', verifyToken, requireRole('Admin'), async (req,
     res.json({ users, generatedAt: new Date().toISOString() });
   } catch (error) {
     console.error('Error fetching user activity:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id, 10);
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({ message: 'Invalid user id' });
+    }
+
+    if (req.user.role !== 'Admin' && req.user.userId !== userId) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const userResult = await pool.query(
+      `
+        SELECT id, name, email, role, daily_quota, is_active, created_at, updated_at
+        FROM users
+        WHERE id = $1
+      `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const [
+      applicationMetricsResult,
+      interviewMetricsResult,
+      assessmentMetricsResult,
+    ] = await Promise.all([
+      pool.query(
+        `
+          SELECT
+            COALESCE(SUM(applications_count), 0) AS total,
+            COALESCE(SUM(CASE WHEN COALESCE(is_approved, false) THEN applications_count ELSE 0 END), 0) AS approved,
+            COALESCE(SUM(CASE WHEN COALESCE(is_approved, false) THEN 0 ELSE applications_count END), 0) AS pending
+          FROM applications
+          WHERE recruiter_id = $1
+        `,
+        [userId],
+      ),
+      pool.query(
+        `
+          SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE COALESCE(is_approved, false)) AS approved,
+            COUNT(*) FILTER (WHERE NOT COALESCE(is_approved, false)) AS pending
+          FROM interviews
+          WHERE recruiter_id = $1
+        `,
+        [userId],
+      ),
+      pool.query(
+        `
+          SELECT
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE COALESCE(is_approved, false)) AS approved,
+            COUNT(*) FILTER (WHERE NOT COALESCE(is_approved, false)) AS pending
+          FROM assessments
+          WHERE recruiter_id = $1
+        `,
+        [userId],
+      ),
+    ]);
+
+    const applicationMetrics = applicationMetricsResult.rows[0] || {};
+    const interviewMetrics = interviewMetricsResult.rows[0] || {};
+    const assessmentMetrics = assessmentMetricsResult.rows[0] || {};
+
+    res.json({
+      user: userResult.rows[0],
+      metrics: {
+        applications: {
+          total: Number(applicationMetrics.total || 0),
+          approved: Number(applicationMetrics.approved || 0),
+          pending: Number(applicationMetrics.pending || 0),
+        },
+        interviews: {
+          total: Number(interviewMetrics.total || 0),
+          approved: Number(interviewMetrics.approved || 0),
+          pending: Number(interviewMetrics.pending || 0),
+        },
+        assessments: {
+          total: Number(assessmentMetrics.total || 0),
+          approved: Number(assessmentMetrics.approved || 0),
+          pending: Number(assessmentMetrics.pending || 0),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching user profile:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

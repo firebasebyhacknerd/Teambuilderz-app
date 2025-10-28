@@ -242,6 +242,12 @@ const AdminCandidates = () => {
     }
   };
 
+  const handleRecruiterLinkClick = (event, recruiterId) => {
+    event.stopPropagation();
+    if (!recruiterId) return;
+    router.push(`/recruiter/profile/${recruiterId}`);
+  };
+
   const actions = (
     <Button
       size="sm"
@@ -256,7 +262,7 @@ const AdminCandidates = () => {
   if (loading) {
     return (
       <DashboardLayout title="Candidate Management" subtitle="Loading assigned candidates" links={sidebarLinks}>
-        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidatesâ€¦</div>
+        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading candidates...</div>
       </DashboardLayout>
     );
   }
@@ -406,10 +412,25 @@ const AdminCandidates = () => {
                         {candidate.current_stage}
                       </Badge>
                     </td>
-                    <td className="px-6 py-4 text-sm text-foreground">{candidate.recruiter_name || 'Unassigned'}</td>
+                    <td className="px-6 py-4 text-sm text-foreground">
+                      {candidate.assigned_recruiter_id ? (
+                        <button
+                          type="button"
+                          className="text-primary hover:underline"
+                          onClick={(event) => handleRecruiterLinkClick(event, candidate.assigned_recruiter_id)}
+                        >
+                          {candidate.recruiter_name || 'Recruiter'}
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">Unassigned</span>
+                      )}
+                    </td>
                     <td className="px-6 py-4 text-sm text-foreground">
                       <div className="flex flex-col">
                         <span className="font-medium">{candidate.total_applications || 0} total</span>
+                        <span className="text-xs text-muted-foreground">
+                          {candidate.approved_applications || 0} approved | {candidate.pending_applications || 0} pending
+                        </span>
                         <span className="text-xs text-muted-foreground">{candidate.daily_applications || 0} today</span>
                       </div>
                     </td>

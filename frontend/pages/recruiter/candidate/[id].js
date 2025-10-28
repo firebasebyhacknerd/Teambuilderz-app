@@ -7,8 +7,6 @@ import {
   Target,
   TrendingUp,
   Edit,
-  Save,
-  X,
   Home,
   FileText,
   AlertTriangle,
@@ -39,6 +37,8 @@ import {
   useCreateAssessmentMutation,
   useUpdateInterviewMutation,
   useUpdateAssessmentMutation,
+  useApproveInterviewMutation,
+  useApproveAssessmentMutation,
 } from '../../../lib/queryHooks';
 
 const sidebarLinks = [
@@ -68,10 +68,6 @@ const CandidateDetailPage = () => {
   const [token, setToken] = useState('');
   const [currentUserRole, setCurrentUserRole] = useState('');
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [editing, setEditing] = useState(false);
-  const [dailyApps, setDailyApps] = useState(0);
-  const [totalApps, setTotalApps] = useState(0);
-  const [error, setError] = useState('');
   const [noteContent, setNoteContent] = useState('');
   const [noteIsPrivate, setNoteIsPrivate] = useState(false);
   const [noteFollowUpEnabled, setNoteFollowUpEnabled] = useState(false);
@@ -167,13 +163,6 @@ const CandidateDetailPage = () => {
     }));
   }, [defaultInterviewCompany]);
 
-  useEffect(() => {
-    if (candidate && !editing) {
-      setDailyApps(candidate.daily_applications || 0);
-      setTotalApps(candidate.total_applications || 0);
-    }
-  }, [candidate, editing]);
-
   const {
     data: notes = [],
     isLoading: notesLoading,
@@ -233,6 +222,24 @@ const createAssessment = useCreateAssessmentMutation(token, {
 
   const updateInterview = useUpdateInterviewMutation(token);
   const updateAssessment = useUpdateAssessmentMutation(token);
+  const approveInterview = useApproveInterviewMutation(token, {
+    onSuccess: () =>
+      setInterviewTimelineMessage({ type: 'success', text: 'Interview approval updated.' }),
+    onError: (error) =>
+      setInterviewTimelineMessage({
+        type: 'error',
+        text: error.message || 'Unable to update interview approval.',
+      }),
+  });
+  const approveAssessment = useApproveAssessmentMutation(token, {
+    onSuccess: () =>
+      setAssessmentTimelineMessage({ type: 'success', text: 'Assessment approval updated.' }),
+    onError: (error) =>
+      setAssessmentTimelineMessage({
+        type: 'error',
+        text: error.message || 'Unable to update assessment approval.',
+      }),
+  });
 
   const handleInterviewFieldChange = (field) => (event) => {
     const { value } = event.target;
@@ -373,6 +380,15 @@ const createAssessment = useCreateAssessmentMutation(token, {
 
   const handleInterviewStatusSave = (interview) => {
     const draftStatus = interviewStatusDrafts[interview.id];
+
+    if (interview.is_approved && currentUserRole !== 'Admin') {
+      setInterviewTimelineMessage({
+        type: 'error',
+        text: 'Approved interviews are locked. Contact an admin to update.',
+      });
+      return;
+    }
+
     const payload = {};
 
     if (draftStatus !== undefined && draftStatus !== interview.status) {
@@ -409,9 +425,27 @@ const createAssessment = useCreateAssessmentMutation(token, {
     );
   };
 
+  const handleInterviewApprovalToggle = (interview, approved) => {
+    setInterviewTimelineMessage(null);
+    approveInterview.mutate({ interviewId: interview.id, approved });
+  };
+
+  const handleAssessmentApprovalToggle = (assessment, approved) => {
+    setAssessmentTimelineMessage(null);
+    approveAssessment.mutate({ assessmentId: assessment.id, approved });
+  };
+
   const handleAssessmentUpdate = (assessment) => {
     const draftStatus = assessmentStatusDrafts[assessment.id];
     const draftScoreRaw = assessmentScoreDrafts[assessment.id];
+
+    if (assessment.is_approved && currentUserRole !== 'Admin') {
+      setAssessmentTimelineMessage({
+        type: 'error',
+        text: 'Approved assessments are locked. Contact an admin to update.',
+      });
+      return;
+    }
 
     const payload = {};
 
@@ -510,45 +544,6 @@ const createAssessment = useCreateAssessmentMutation(token, {
   });
 
   const noteActionsDisabled = updateNote.isPending || deleteNote.isPending;
-
-  const handleSave = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_URL}/api/v1/candidates/${id}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          daily_applications: dailyApps,
-          total_applications: totalApps
-        })
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.message || 'Failed to update candidate.');
-      }
-
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.candidates(token),
-      });
-      setEditing(false);
-      setError('');
-    } catch (updateError) {
-      console.error('Error updating candidate:', updateError);
-      setError(updateError.message);
-    }
-  };
-
-  const handleCancel = () => {
-    if (!candidate) return;
-    setDailyApps(candidate.daily_applications || 0);
-    setTotalApps(candidate.total_applications || 0);
-    setEditing(false);
-    setError('');
-  };
 
   const handleNoteSubmit = (event) => {
     event.preventDefault();
@@ -687,77 +682,45 @@ const createAssessment = useCreateAssessmentMutation(token, {
         <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>{stageLabel}</Badge>
       }
     >
-      {error && (
-        <div className="mb-4 text-sm text-red-600 bg-red-100/80 border border-red-200 rounded-lg p-3">{error}</div>
-      )}
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-6 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-foreground">Candidate Information</h2>
-            {!editing ? (
-              <Button size="sm" className="gap-2" onClick={() => setEditing(true)}>
-                <Edit className="h-4 w-4" />
-                Edit
-              </Button>
-            ) : (
-              <div className="flex gap-2">
-                <Button size="sm" className="gap-2 bg-green-600 hover:bg-green-600/90" onClick={handleSave}>
-                  <Save className="h-4 w-4" />
-                  Save
-                </Button>
-                <Button size="sm" variant="outline" className="gap-2" onClick={handleCancel}>
-                  <X className="h-4 w-4" />
-                  Cancel
-                </Button>
-              </div>
-            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <InfoTile icon={<User className="h-5 w-5 text-blue-600" />} label="Name" value={candidate.name} />
+            <InfoTile
+              icon={<Users className="h-5 w-5 text-emerald-600" />}
+              label="Assigned Recruiter"
+              value={
+                candidate.assigned_recruiter_id ? (
+                  <button
+                    type="button"
+                    className="text-primary hover:underline"
+                    onClick={() => goToRecruiterProfile(candidate.assigned_recruiter_id)}
+                  >
+                    {candidate.recruiter_name || 'View recruiter'}
+                  </button>
+                ) : (
+                  'Unassigned'
+                )
+              }
+            />
             <InfoTile icon={<Briefcase className="h-5 w-5 text-emerald-600" />} label="Primary Skill" value={primarySkill} />
-            <InfoTile icon={<Target className="h-5 w-5 text-purple-600" />} label="Daily Applications" value={
-              editing ? (
-                <Input
-                  type="number"
-                  value={dailyApps}
-                  onChange={(e) => setDailyApps(parseInt(e.target.value, 10) || 0)}
-                  className="max-w-[120px]"
-                />
-              ) : (
-                candidate.daily_applications || 0
-              )
-            } />
-            <InfoTile icon={<TrendingUp className="h-5 w-5 text-orange-600" />} label="Total Applications" value={
-              editing ? (
-                <Input
-                  type="number"
-                  value={totalApps}
-                  onChange={(e) => setTotalApps(parseInt(e.target.value, 10) || 0)}
-                  className="max-w-[120px]"
-                />
-              ) : (
-                candidate.total_applications || 0
-              )
-            } />
+            <InfoTile icon={<Target className="h-5 w-5 text-purple-600" />} label="Daily Applications" value={candidate.daily_applications || 0} />
+            <InfoTile icon={<FileText className="h-5 w-5 text-blue-600" />} label="Total Applications (All Time)" value={candidate.total_applications || 0} />
+            <InfoTile icon={<TrendingUp className="h-5 w-5 text-emerald-600" />} label="Approved Applications (All Time)" value={candidate.approved_applications || 0} />
+            <InfoTile icon={<AlertTriangle className="h-5 w-5 text-amber-600" />} label="Pending Applications (All Time)" value={candidate.pending_applications || 0} />
           </div>
         </Card>
 
         <Card className="p-6 space-y-4">
           <h3 className="text-lg font-semibold text-foreground">Performance Snapshot</h3>
           <StatBadge label="Today's Applications" value={candidate.daily_applications || 0} tone="bg-blue-100 text-blue-700" />
-          <StatBadge label="Total Applications" value={candidate.total_applications || 0} tone="bg-green-100 text-green-700" />
-          <StatBadge
-            label="Daily vs Total"
-            value={
-              candidate.total_applications > 0
-                ? Math.round(((candidate.daily_applications || 0) / candidate.total_applications) * 100)
-                : 0
-            }
-            suffix="%"
-            tone="bg-purple-100 text-purple-700"
-          />
+          <StatBadge label="Approved Total" value={candidate.approved_applications || 0} tone="bg-emerald-100 text-emerald-700" />
+          <StatBadge label="Pending Total" value={candidate.pending_applications || 0} tone="bg-amber-100 text-amber-700" />
+          <StatBadge label="Overall Total" value={candidate.total_applications || 0} tone="bg-slate-100 text-slate-700" />
         </Card>
       </div>
 
@@ -999,54 +962,88 @@ const createAssessment = useCreateAssessmentMutation(token, {
                   {interviewTimelineMessage.text}
                 </div>
               )}
-              {candidateInterviews.map((interview) => (
-                <div key={interview.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {interview.company_name || 'Company not set'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatLabel(interview.interview_type)} - Round {interview.round_number || 1}
-                      </p>
+              {candidateInterviews.map((interview) => {
+                const isInterviewApproved = Boolean(interview.is_approved);
+                const canEditInterview = currentUserRole === 'Admin' || !isInterviewApproved;
+                const interviewApprovalUpdating =
+                  approveInterview.isPending &&
+                  approveInterview.variables?.interviewId === interview.id;
+
+                return (
+                  <div key={interview.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {interview.company_name || 'Company not set'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatLabel(interview.interview_type)} · Round {interview.round_number || 1}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          className={
+                            isInterviewApproved
+                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-700 border border-amber-200'
+                          }
+                        >
+                          {isInterviewApproved ? 'Approved' : 'Pending'}
+                        </Badge>
+                        {currentUserRole === 'Admin' && (
+                          <Button
+                            type="button"
+                            variant={isInterviewApproved ? 'outline' : 'default'}
+                            size="xs"
+                            onClick={() => handleInterviewApprovalToggle(interview, !isInterviewApproved)}
+                            disabled={interviewApprovalUpdating}
+                          >
+                            {interviewApprovalUpdating ? 'Updating...' : isInterviewApproved ? 'Undo' : 'Approve'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-xs font-medium text-primary">
-                      {formatDateTime(interview.scheduled_date)}
-                    </span>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      <span>{formatDateTime(interview.scheduled_date)}</span>
+                      <span>|</span>
+                      <span>{interview.timezone || 'UTC'}</span>
+                    </div>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="flex flex-col text-xs text-muted-foreground">
+                        <span className="mb-1 font-medium text-foreground">Status</span>
+                        <select
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          value={interviewStatusDrafts[interview.id] ?? interview.status}
+                          onChange={(event) => handleInterviewStatusChange(interview.id, event.target.value)}
+                          disabled={!canEditInterview}
+                        >
+                          {INTERVIEW_STATUSES.map((statusOption) => (
+                            <option key={statusOption} value={statusOption}>
+                              {formatLabel(statusOption)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {canEditInterview ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="self-start"
+                          onClick={() => handleInterviewStatusSave(interview)}
+                          disabled={updateInterview.isPending}
+                        >
+                          {updateInterview.isPending ? 'Saving...' : 'Save'}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Locked (approved)</span>
+                      )}
+                    </div>
+                    {interview.notes ? (
+                      <p className="mt-2 text-xs text-muted-foreground">{interview.notes}</p>
+                    ) : null}
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    <span>{interview.timezone || 'UTC'}</span>
-                  </div>
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label className="flex flex-col text-xs text-muted-foreground">
-                      <span className="mb-1 font-medium text-foreground">Status</span>
-                      <select
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        value={interviewStatusDrafts[interview.id] ?? interview.status}
-                        onChange={(event) => handleInterviewStatusChange(interview.id, event.target.value)}
-                      >
-                        {INTERVIEW_STATUSES.map((statusOption) => (
-                          <option key={statusOption} value={statusOption}>
-                            {formatLabel(statusOption)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="self-start"
-                      onClick={() => handleInterviewStatusSave(interview)}
-                      disabled={updateInterview.isPending}
-                    >
-                      {updateInterview.isPending ? 'Saving...' : 'Save'}
-                    </Button>
-                  </div>
-                  {interview.notes ? (
-                    <p className="mt-2 text-xs text-muted-foreground">{interview.notes}</p>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
@@ -1080,65 +1077,101 @@ const createAssessment = useCreateAssessmentMutation(token, {
                   {assessmentTimelineMessage.text}
                 </div>
               )}
-              {candidateAssessments.map((assessment) => (
-                <div key={assessment.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {assessment.assessment_platform || 'Platform not set'}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatLabel(assessment.assessment_type)}
-                      </p>
+              {candidateAssessments.map((assessment) => {
+                const isAssessmentApproved = Boolean(assessment.is_approved);
+                const canEditAssessment = currentUserRole === 'Admin' || !isAssessmentApproved;
+                const assessmentApprovalUpdating =
+                  approveAssessment.isPending &&
+                  approveAssessment.variables?.assessmentId === assessment.id;
+
+                return (
+                  <div key={assessment.id} className="rounded-md border border-border bg-card/70 p-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {assessment.assessment_platform || 'Platform not set'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatLabel(assessment.assessment_type)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          className={
+                            isAssessmentApproved
+                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                              : 'bg-amber-100 text-amber-700 border border-amber-200'
+                          }
+                        >
+                          {isAssessmentApproved ? 'Approved' : 'Pending'}
+                        </Badge>
+                        {currentUserRole === 'Admin' && (
+                          <Button
+                            type="button"
+                            variant={isAssessmentApproved ? 'outline' : 'default'}
+                            size="xs"
+                            onClick={() => handleAssessmentApprovalToggle(assessment, !isAssessmentApproved)}
+                            disabled={assessmentApprovalUpdating}
+                          >
+                            {assessmentApprovalUpdating ? 'Updating...' : isAssessmentApproved ? 'Undo' : 'Approve'}
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-xs font-medium text-primary">
-                      Due {formatDate(assessment.due_date)}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-muted-foreground">
-                    <label className="flex flex-col gap-1">
-                      <span className="font-medium text-foreground">Status</span>
-                      <select
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        value={assessmentStatusDrafts[assessment.id] ?? assessment.status}
-                        onChange={(event) => handleAssessmentStatusChange(assessment.id, event.target.value)}
-                      >
-                        {ASSESSMENT_STATUSES.map((statusOption) => (
-                          <option key={statusOption} value={statusOption}>
-                            {formatLabel(statusOption)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="font-medium text-foreground">Score (optional)</span>
-                      <Input
-                        value={
-                          Object.prototype.hasOwnProperty.call(assessmentScoreDrafts, assessment.id)
-                            ? assessmentScoreDrafts[assessment.id]
-                            : assessment.score ?? ''
-                        }
-                        onChange={(event) => handleAssessmentScoreChange(assessment.id, event.target.value)}
-                        placeholder="e.g., 85"
-                      />
-                    </label>
-                    <div className="flex items-end">
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="w-full sm:w-auto"
-                        onClick={() => handleAssessmentUpdate(assessment)}
-                        disabled={updateAssessment.isPending}
-                      >
-                        {updateAssessment.isPending ? 'Saving...' : 'Save'}
-                      </Button>
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      <span>Due {formatDate(assessment.due_date)}</span>
                     </div>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs text-muted-foreground">
+                      <label className="flex flex-col gap-1">
+                        <span className="font-medium text-foreground">Status</span>
+                        <select
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          value={assessmentStatusDrafts[assessment.id] ?? assessment.status}
+                          onChange={(event) => handleAssessmentStatusChange(assessment.id, event.target.value)}
+                          disabled={!canEditAssessment}
+                        >
+                          {ASSESSMENT_STATUSES.map((statusOption) => (
+                            <option key={statusOption} value={statusOption}>
+                              {formatLabel(statusOption)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="font-medium text-foreground">Score (optional)</span>
+                        <Input
+                          value={
+                            Object.prototype.hasOwnProperty.call(assessmentScoreDrafts, assessment.id)
+                              ? assessmentScoreDrafts[assessment.id]
+                              : assessment.score ?? ''
+                          }
+                          onChange={(event) => handleAssessmentScoreChange(assessment.id, event.target.value)}
+                          placeholder="e.g., 85"
+                          disabled={!canEditAssessment}
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        {canEditAssessment ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="w-full sm:w-auto"
+                            onClick={() => handleAssessmentUpdate(assessment)}
+                            disabled={updateAssessment.isPending}
+                          >
+                            {updateAssessment.isPending ? 'Saving...' : 'Save'}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Locked (approved)</span>
+                        )}
+                      </div>
+                    </div>
+                    {assessment.notes ? (
+                      <p className="mt-2 text-xs text-muted-foreground">{assessment.notes}</p>
+                    ) : null}
                   </div>
-                  {assessment.notes ? (
-                    <p className="mt-2 text-xs text-muted-foreground">{assessment.notes}</p>
-                  ) : null}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>
