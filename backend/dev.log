@@ -1,0 +1,92 @@
+
+> teambuilderz-backend@1.0.0 dev
+> nodemon server.js
+
+[33m[nodemon] 3.1.10[39m
+[33m[nodemon] to restart at any time, enter `rs`[39m
+[33m[nodemon] watching path(s): *.*[39m
+[33m[nodemon] watching extensions: js,mjs,cjs,json[39m
+[32m[nodemon] starting `node server.js`[39m
+Connected to PostgreSQL!
+Database tables detected. Ensuring schema completeness...
+Automation tasks scheduled
+Server running on http://localhost:3001
+API endpoints available:
+  Authentication:
+    POST /api/v1/auth/login - User login
+  Candidates:
+    GET  /api/v1/candidates - Get candidates (requires auth)
+    POST /api/v1/candidates - Create candidate (requires auth)
+    PUT  /api/v1/candidates/:id - Update candidate (requires auth)
+    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)
+    POST /api/v1/candidates/:id/notes - Create note (requires auth)
+    GET  /api/v1/candidates/:id/assignments - Assignment history (requires auth)
+    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)
+    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)
+  Applications:
+    GET  /api/v1/applications - Get applications (requires auth)
+    POST /api/v1/applications - Create application (requires auth)
+  Interviews:
+    GET  /api/v1/interviews - Get interviews (requires auth)
+    POST /api/v1/interviews - Create interview (requires auth)
+  Assessments:
+    GET  /api/v1/assessments - Get assessments (requires auth)
+    POST /api/v1/assessments - Create assessment (requires auth)
+  Reports:
+    GET  /api/v1/reports/performance - Get performance reports (requires auth)
+    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)
+    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)
+    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)
+  Notifications:
+    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)
+  Alerts:
+    GET  /api/v1/alerts - Get alerts (requires auth)
+  Users (Admin only):
+    GET  /api/v1/users/activity - User activity (requires admin)
+    GET  /api/v1/users - Get users (requires admin)
+    POST /api/v1/users - Create user (requires admin)
+    PUT  /api/v1/users/:id - Update user (requires admin)
+    DELETE /api/v1/users/:id - Delete user (requires admin)
+[31m[nodemon] app crashed - waiting for file changes before starting...[39m
+[32m[nodemon] restarting child process[39m
+[32m[nodemon] starting `node server.js`[39m
+Connected to PostgreSQL!
+Database tables detected. Ensuring schema completeness...
+Automation tasks scheduled
+Server running on http://localhost:3001
+API endpoints available:
+  Authentication:
+    POST /api/v1/auth/login - User login
+  Candidates:
+    GET  /api/v1/candidates - Get candidates (requires auth)
+    POST /api/v1/candidates - Create candidate (requires auth)
+    PUT  /api/v1/candidates/:id - Update candidate (requires auth)
+    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)
+    POST /api/v1/candidates/:id/notes - Create note (requires auth)
+    GET  /api/v1/candidates/:id/assignments - Assignment history (requires auth)
+    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)
+    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)
+  Applications:
+    GET  /api/v1/applications - Get applications (requires auth)
+    POST /api/v1/applications - Create application (requires auth)
+  Interviews:
+    GET  /api/v1/interviews - Get interviews (requires auth)
+    POST /api/v1/interviews - Create interview (requires auth)
+  Assessments:
+    GET  /api/v1/assessments - Get assessments (requires auth)
+    POST /api/v1/assessments - Create assessment (requires auth)
+  Reports:
+    GET  /api/v1/reports/performance - Get performance reports (requires auth)
+    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)
+    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)
+    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)
+  Notifications:
+    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)
+  Alerts:
+    GET  /api/v1/alerts - Get alerts (requires auth)
+  Users (Admin only):
+    GET  /api/v1/users/activity - User activity (requires admin)
+    GET  /api/v1/users - Get users (requires admin)
+    POST /api/v1/users - Create user (requires admin)
+    PUT  /api/v1/users/:id - Update user (requires admin)
+    DELETE /api/v1/users/:id - Delete user (requires admin)

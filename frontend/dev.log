@@ -1,0 +1,14 @@
+
+> teambuilderz-frontend@1.0.0 dev
+> node ./node_modules/next/dist/bin/next dev
+
+  ▲ Next.js 14.2.33
+  - Local:        http://localhost:3000
+  - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 2.7s
+ ○ Compiling /login ...
+ ✓ Compiled /login in 2.8s (380 modules)
+ ✓ Compiled in 378ms (380 modules)
+ GET /login 200 in 3591ms
