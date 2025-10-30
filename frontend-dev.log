@@ -1,0 +1,10 @@
+
+> teambuilderz-frontend@1.0.0 dev
+> node ./node_modules/next/dist/bin/next dev
+
+  ▲ Next.js 14.2.33
+  - Local:        http://localhost:3000
+  - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 2.7s

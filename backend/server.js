@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -13,6 +14,17 @@ if (!SECRET_KEY) {
   console.error('JWT_SECRET environment variable is required');
   process.exit(1);
 }
+
+// Security configuration
+const authLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  statusCode: 429,
+  message: { message: 'Too many login attempts. Please try again after 5 minutes.' },
+});
 
 // Database Connection Setup
 const pool = new Pool({
@@ -460,7 +472,7 @@ const fetchCandidateWithAccess = async (candidateId, user) => {
 };
 
 // Authentication Route
-app.post('/api/v1/auth/login', async (req, res) => {
+app.post('/api/v1/auth/login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   try {
