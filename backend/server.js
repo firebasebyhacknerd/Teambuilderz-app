@@ -1625,6 +1625,21 @@ app.delete('/api/v1/applications/:id', verifyToken, requireRole('Admin'), async 
     await pool.query('DELETE FROM applications WHERE id = $1', [applicationId]);
 
     if (application.recruiter_id) {
+      const candidateResult = await pool.query('SELECT name FROM candidates WHERE id = $1', [application.candidate_id]);
+      const candidateName = candidateResult.rows[0]?.name || 'their candidate';
+
+      await pool.query(
+        `
+          INSERT INTO alerts (user_id, alert_type, title, message, priority)
+          VALUES ($1, 'submission_rejected', $2, $3, 2)
+        `,
+        [
+          application.recruiter_id,
+          'Application Rejected',
+          `An admin rejected the application for ${candidateName}. Please update and resubmit.`,
+        ],
+      );
+
       const date = application.application_date
         ? new Date(application.application_date).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0];
@@ -1871,6 +1886,23 @@ app.post('/api/v1/interviews/:id/approval', verifyToken, requireRole('Admin'), a
 
     const interview = updated.rows[0];
 
+    if (!shouldApprove && interview?.recruiter_id) {
+      const candidateResult = await pool.query('SELECT name FROM candidates WHERE id = $1', [interview.candidate_id]);
+      const candidateName = candidateResult.rows[0]?.name || 'their candidate';
+
+      await pool.query(
+        `
+          INSERT INTO alerts (user_id, alert_type, title, message, priority)
+          VALUES ($1, 'submission_rejected', $2, $3, 2)
+        `,
+        [
+          interview.recruiter_id,
+          'Interview Rejected',
+          `An admin rejected the interview for ${candidateName}. Please review the details and resubmit.`,
+        ],
+      );
+    }
+
     await pool.query(
       `
         INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
@@ -2070,6 +2102,23 @@ app.post('/api/v1/assessments/:id/approval', verifyToken, requireRole('Admin'), 
 
     const assessment = updated.rows[0];
 
+    if (!shouldApprove && assessment?.recruiter_id) {
+      const candidateResult = await pool.query('SELECT name FROM candidates WHERE id = $1', [assessment.candidate_id]);
+      const candidateName = candidateResult.rows[0]?.name || 'their candidate';
+
+      await pool.query(
+        `
+          INSERT INTO alerts (user_id, alert_type, title, message, priority)
+          VALUES ($1, 'submission_rejected', $2, $3, 2)
+        `,
+        [
+          assessment.recruiter_id,
+          'Assessment Rejected',
+          `An admin rejected the assessment for ${candidateName}. Please review and resubmit.`,
+        ],
+      );
+    }
+
     await pool.query(
       `
         INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
@@ -2132,8 +2181,36 @@ app.get('/api/v1/reports/performance', verifyToken, async (req, res) => {
 
 app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
-    const [{ rows: candidateSummaryRows }, { rows: stageRows }, { rows: marketingRows }, { rows: productivityRows }] =
-      await Promise.all([
+    const parseISODate = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) {
+        return null;
+      }
+      return parsed;
+    };
+
+    const today = new Date();
+    let startDate = parseISODate(req.query?.date_from) ?? today;
+    let endDate = parseISODate(req.query?.date_to) ?? today;
+    if (startDate > endDate) {
+      const tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+    }
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+    const startDateTime = `${startDateStr} 00:00:00`;
+    const endDateTime = `${endDateStr} 23:59:59`;
+
+    const [
+      { rows: candidateSummaryRows },
+      { rows: stageRows },
+      { rows: marketingRows },
+      { rows: productivityRows },
+      { rows: rangeActivityRows },
+      { rows: applicationsRangeRows },
+    ] = await Promise.all([
         pool.query(`
           SELECT
             COUNT(*)::int AS total_candidates,
@@ -2169,17 +2246,21 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
             u.id,
             u.name,
             u.daily_quota,
-            COALESCE(today.applications_count, 0) AS applications_today,
-            COALESCE(today.interviews_count, 0) AS interviews_today,
-            COALESCE(today.assessments_count, 0) AS assessments_today,
+            COALESCE(range_counts.applications_total, 0) AS applications_in_range,
+            COALESCE(range_counts.interviews_total, 0) AS interviews_in_range,
+            COALESCE(range_counts.assessments_total, 0) AS assessments_in_range,
             COALESCE(last7.avg_apps, 0)::numeric(10,2) AS avg_apps_last_7,
             COALESCE(last30.avg_apps, 0)::numeric(10,2) AS avg_apps_last_30
           FROM users u
           LEFT JOIN (
-            SELECT user_id, applications_count, interviews_count, assessments_count
+            SELECT user_id,
+                   SUM(applications_count) AS applications_total,
+                   SUM(interviews_count) AS interviews_total,
+                   SUM(assessments_count) AS assessments_total
             FROM daily_activity
-            WHERE activity_date = CURRENT_DATE
-          ) today ON today.user_id = u.id
+            WHERE activity_date BETWEEN $1 AND $2
+            GROUP BY user_id
+          ) range_counts ON range_counts.user_id = u.id
           LEFT JOIN (
             SELECT user_id, AVG(applications_count) AS avg_apps
             FROM daily_activity
@@ -2194,7 +2275,32 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
           ) last30 ON last30.user_id = u.id
           WHERE u.role = 'Recruiter' AND u.is_active = true
           ORDER BY u.name
-        `),
+        `, [startDateStr, endDateStr]),
+        pool.query(
+          `
+            SELECT
+              COALESCE(SUM(applications_count), 0) AS applications_total,
+              COALESCE(SUM(interviews_count), 0) AS interviews_total,
+              COALESCE(SUM(assessments_count), 0) AS assessments_total
+            FROM daily_activity
+            WHERE activity_date BETWEEN $1 AND $2
+          `,
+          [startDateStr, endDateStr],
+        ),
+        pool.query(`
+          SELECT
+            COALESCE(SUM(applications_count), 0)::int AS total,
+            COALESCE(
+              SUM(CASE WHEN COALESCE(is_approved, false) THEN applications_count ELSE 0 END),
+              0
+            )::int AS approved,
+            COALESCE(
+              SUM(CASE WHEN COALESCE(is_approved, false) THEN 0 ELSE applications_count END),
+              0
+            )::int AS pending
+          FROM applications
+          WHERE application_date BETWEEN $1 AND $2
+        `, [startDateStr, endDateStr]),
       ]);
 
     const candidateSummary = candidateSummaryRows[0] || {
@@ -2204,18 +2310,25 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
       avg_tenure_days: 0,
     };
 
-    const totalApplicationsToday = productivityRows.reduce(
-      (sum, row) => sum + Number(row.applications_today || 0),
-      0,
-    );
-    const totalInterviewsToday = productivityRows.reduce(
-      (sum, row) => sum + Number(row.interviews_today || 0),
-      0,
-    );
-    const totalAssessmentsToday = productivityRows.reduce(
-      (sum, row) => sum + Number(row.assessments_today || 0),
-      0,
-    );
+    const activityTotals = rangeActivityRows[0] || {
+      applications_total: 0,
+      interviews_total: 0,
+      assessments_total: 0,
+    };
+
+    const totalApplicationsInRange = Number(activityTotals.applications_total) || 0;
+    const totalInterviewsInRange = Number(activityTotals.interviews_total) || 0;
+    const totalAssessmentsInRange = Number(activityTotals.assessments_total) || 0;
+
+    const applicationsTodayMetrics = applicationsRangeRows[0] || {
+      total: 0,
+      approved: 0,
+      pending: 0,
+    };
+
+    const totalApplicationsToday = Number(applicationsTodayMetrics.total) || 0;
+    const applicationsApprovedToday = Number(applicationsTodayMetrics.approved) || 0;
+    const applicationsPendingToday = Number(applicationsTodayMetrics.pending) || 0;
 
     res.json({
       summary: {
@@ -2224,9 +2337,14 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
         marketingCandidates: Number(candidateSummary.marketing_candidates) || 0,
         avgCandidateTenureDays: Number(candidateSummary.avg_tenure_days) || 0,
         totalRecruiters: productivityRows.length,
-        totalApplicationsToday,
-        totalInterviewsToday,
-        totalAssessmentsToday,
+        totalApplicationsToday: totalApplicationsInRange,
+        totalInterviewsToday: totalInterviewsInRange,
+        totalAssessmentsToday: totalAssessmentsInRange,
+        applicationsTodayBreakdown: {
+          total: totalApplicationsToday,
+          approved: applicationsApprovedToday,
+          pending: applicationsPendingToday,
+        },
       },
       candidateStages: stageRows.map((row) => ({
         stage: row.current_stage,
@@ -2240,16 +2358,20 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
         id: row.id,
         name: row.name,
         dailyQuota: Number(row.daily_quota) || 0,
-        applicationsToday: Number(row.applications_today) || 0,
-        interviewsToday: Number(row.interviews_today) || 0,
-        assessmentsToday: Number(row.assessments_today) || 0,
+        applicationsRange: Number(row.applications_in_range) || 0,
+        interviewsRange: Number(row.interviews_in_range) || 0,
+        assessmentsRange: Number(row.assessments_in_range) || 0,
         avgApplicationsLast7Days: Number(row.avg_apps_last_7) || 0,
         avgApplicationsLast30Days: Number(row.avg_apps_last_30) || 0,
         quotaProgress:
           row.daily_quota && Number(row.daily_quota) > 0
-            ? Number(row.applications_today || 0) / Number(row.daily_quota)
+            ? Number(row.applications_in_range || 0) / Number(row.daily_quota)
             : 0,
       })),
+      range: {
+        dateFrom: startDateStr,
+        dateTo: endDateStr,
+      },
     });
   } catch (error) {
     console.error('Error building overview report:', error);
@@ -2259,11 +2381,35 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
 
 app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
+    const parseISODate = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return parsed;
+    };
+
+    const today = new Date();
+    let startDate = parseISODate(req.query?.date_from) ?? today;
+    let endDate = parseISODate(req.query?.date_to) ?? today;
+    if (startDate > endDate) {
+      const tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+    }
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+    const startDateTime = `${startDateStr} 00:00:00`;
+    const endDateTime = `${endDateStr} 23:59:59`;
+
     const [
       notesResult,
       remindersResult,
       recruiterNotesResult,
       notesByRecruiterResult,
+      pendingApplicationsResult,
+      pendingInterviewsResult,
+      pendingAssessmentsResult,
+      recentApprovalsResult,
     ] = await Promise.all([
       pool.query(
         `
@@ -2280,9 +2426,11 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
           FROM notes n
           JOIN users u ON n.author_id = u.id
           LEFT JOIN candidates c ON n.candidate_id = c.id
+          WHERE n.created_at BETWEEN $1 AND $2
           ORDER BY n.created_at DESC
           LIMIT 15
-        `
+        `,
+        [startDateTime, endDateTime],
       ),
       pool.query(
         `
@@ -2302,9 +2450,11 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
           LEFT JOIN notes n ON r.note_id = n.id
           LEFT JOIN candidates c ON n.candidate_id = c.id
           WHERE r.status IN ('pending', 'snoozed')
+            AND r.due_date BETWEEN $1 AND $2
           ORDER BY r.due_date ASC
           LIMIT 15
-        `
+        `,
+        [startDateStr, endDateStr],
       ),
       pool.query(
         `
@@ -2322,9 +2472,11 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
           JOIN users u ON n.author_id = u.id
           LEFT JOIN candidates c ON n.candidate_id = c.id
           WHERE u.role = 'Recruiter'
+            AND n.created_at BETWEEN $1 AND $2
           ORDER BY n.created_at DESC
           LIMIT 100
-        `
+        `,
+        [startDateTime, endDateTime],
       ),
       pool.query(
         `
@@ -2341,6 +2493,111 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
           GROUP BY u.id, u.name, u.daily_quota
           ORDER BY total_notes DESC, u.name ASC
         `
+      ),
+      pool.query(
+        `
+          SELECT
+            a.id,
+            a.company_name AS "companyName",
+            a.job_title AS "jobTitle",
+            a.applications_count AS "applicationsCount",
+            a.application_date AS "applicationDate",
+            a.created_at AS "createdAt",
+            c.id AS "candidateId",
+            c.name AS "candidateName",
+            u.id AS "recruiterId",
+            u.name AS "recruiterName"
+          FROM applications a
+          LEFT JOIN candidates c ON c.id = a.candidate_id
+          LEFT JOIN users u ON u.id = a.recruiter_id
+          WHERE COALESCE(a.is_approved, false) = false
+            AND (
+              a.application_date BETWEEN $1 AND $2
+              OR a.created_at BETWEEN $3 AND $4
+            )
+          ORDER BY a.application_date DESC, a.created_at DESC
+          LIMIT 15
+        `,
+        [startDateStr, endDateStr, startDateTime, endDateTime],
+      ),
+      pool.query(
+        `
+          SELECT
+            i.id,
+            i.company_name AS "companyName",
+            i.interview_type AS "interviewType",
+            i.scheduled_date AS "scheduledDate",
+            i.status,
+            i.created_at AS "createdAt",
+            c.id AS "candidateId",
+            c.name AS "candidateName",
+            u.id AS "recruiterId",
+            u.name AS "recruiterName"
+          FROM interviews i
+          LEFT JOIN candidates c ON c.id = i.candidate_id
+          LEFT JOIN users u ON u.id = i.recruiter_id
+          WHERE COALESCE(i.is_approved, false) = false
+            AND (
+              i.scheduled_date BETWEEN $1 AND $2
+              OR i.created_at BETWEEN $3 AND $4
+            )
+          ORDER BY i.scheduled_date ASC NULLS LAST, i.created_at DESC
+          LIMIT 15
+        `,
+        [startDateTime, endDateTime, startDateTime, endDateTime],
+      ),
+      pool.query(
+        `
+          SELECT
+            s.id,
+            s.assessment_platform AS "assessmentPlatform",
+            s.assessment_type AS "assessmentType",
+            s.due_date AS "dueDate",
+            s.status,
+            s.created_at AS "createdAt",
+            c.id AS "candidateId",
+            c.name AS "candidateName",
+            u.id AS "recruiterId",
+            u.name AS "recruiterName"
+          FROM assessments s
+          LEFT JOIN candidates c ON c.id = s.candidate_id
+          LEFT JOIN users u ON u.id = s.recruiter_id
+          WHERE COALESCE(s.is_approved, false) = false
+            AND (
+              s.due_date BETWEEN $1 AND $2
+              OR s.created_at BETWEEN $3 AND $4
+            )
+          ORDER BY s.due_date ASC NULLS LAST, s.created_at DESC
+          LIMIT 15
+        `,
+        [startDateStr, endDateStr, startDateTime, endDateTime],
+      ),
+      pool.query(
+        `
+          SELECT
+            al.id,
+            al.table_name,
+            al.action,
+            al.record_id,
+            al.old_values,
+            al.new_values,
+            al.created_at,
+            act.id AS actor_id,
+            act.name AS actor_name,
+            COALESCE((al.new_values->>'recruiter_id')::int, (al.old_values->>'recruiter_id')::int) AS recruiter_id,
+            rec.name AS recruiter_name,
+            COALESCE((al.new_values->>'candidate_id')::int, (al.old_values->>'candidate_id')::int) AS candidate_id,
+            cand.name AS candidate_name
+          FROM audit_logs al
+          LEFT JOIN users act ON act.id = al.user_id
+          LEFT JOIN users rec ON rec.id = COALESCE((al.new_values->>'recruiter_id')::int, (al.old_values->>'recruiter_id')::int)
+          LEFT JOIN candidates cand ON cand.id = COALESCE((al.new_values->>'candidate_id')::int, (al.old_values->>'candidate_id')::int)
+          WHERE al.table_name IN ('applications', 'interviews', 'assessments')
+            AND al.created_at BETWEEN $1 AND $2
+          ORDER BY al.created_at DESC
+          LIMIT 20
+        `,
+        [startDateTime, endDateTime],
       ),
     ]);
 
@@ -2400,10 +2657,413 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
       lastNoteAt: row.last_note_at,
     }));
 
-    res.json({ recentNotes, upcomingReminders, recruiterNotes, notesByRecruiter });
+    const pendingApplications = pendingApplicationsResult.rows.map((row) => ({
+      id: row.id,
+      companyName: row.companyName,
+      jobTitle: row.jobTitle,
+      applicationsCount: Number(row.applicationsCount || 0),
+      applicationDate: row.applicationDate,
+      createdAt: row.createdAt,
+      candidate: row.candidateId ? { id: row.candidateId, name: row.candidateName } : null,
+      recruiter: row.recruiterId ? { id: row.recruiterId, name: row.recruiterName } : null,
+    }));
+
+    const pendingInterviews = pendingInterviewsResult.rows.map((row) => ({
+      id: row.id,
+      companyName: row.companyName,
+      interviewType: row.interviewType,
+      scheduledDate: row.scheduledDate,
+      status: row.status,
+      createdAt: row.createdAt,
+      candidate: row.candidateId ? { id: row.candidateId, name: row.candidateName } : null,
+      recruiter: row.recruiterId ? { id: row.recruiterId, name: row.recruiterName } : null,
+    }));
+
+    const pendingAssessments = pendingAssessmentsResult.rows.map((row) => ({
+      id: row.id,
+      assessmentPlatform: row.assessmentPlatform,
+      assessmentType: row.assessmentType,
+      dueDate: row.dueDate,
+      status: row.status,
+      createdAt: row.createdAt,
+      candidate: row.candidateId ? { id: row.candidateId, name: row.candidateName } : null,
+      recruiter: row.recruiterId ? { id: row.recruiterId, name: row.recruiterName } : null,
+    }));
+
+    const recentApprovals = recentApprovalsResult.rows.map((row) => {
+      const entity =
+        row.table_name === 'applications'
+          ? 'Application'
+          : row.table_name === 'interviews'
+          ? 'Interview'
+          : row.table_name === 'assessments'
+          ? 'Assessment'
+          : row.table_name;
+      const newValues = row.new_values || {};
+      const oldValues = row.old_values || {};
+      let decision = 'updated';
+
+      if (row.table_name === 'applications') {
+        if (row.action === 'DELETE') {
+          decision = 'rejected';
+        } else if (row.action === 'UPDATE') {
+          decision = newValues.is_approved === true ? 'approved' : 'rejected';
+        }
+      } else {
+        if (row.action === 'UPDATE') {
+          if (newValues.is_approved === true) {
+            decision = 'approved';
+          } else if (newValues.is_approved === false || newValues.status === 'rejected') {
+            decision = 'rejected';
+          }
+        } else if (row.action === 'DELETE') {
+          decision = 'deleted';
+        }
+      }
+
+      return {
+        id: row.id,
+        entity,
+        decision,
+        actor: {
+          id: row.actor_id,
+          name: row.actor_name || 'System',
+        },
+        recruiter: row.recruiter_id ? { id: row.recruiter_id, name: row.recruiter_name } : null,
+        candidate: row.candidate_id ? { id: row.candidate_id, name: row.candidate_name } : null,
+        createdAt: row.created_at,
+        recordId: row.record_id,
+      };
+    });
+
+    res.json({
+      recentNotes,
+      upcomingReminders,
+      recruiterNotes,
+      notesByRecruiter,
+      pendingApprovals: {
+        applications: pendingApplications,
+        interviews: pendingInterviews,
+        assessments: pendingAssessments,
+      },
+      recentApprovals,
+      range: {
+        dateFrom: startDateStr,
+        dateTo: endDateStr,
+      },
+    });
   } catch (error) {
     console.error('Error fetching activity feed:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post('/api/v1/pending-approvals/bulk', verifyToken, requireRole('Admin'), async (req, res) => {
+  const recruiterId = parseInt(req.body?.recruiterId, 10);
+  const action = typeof req.body?.action === 'string' ? req.body.action.toLowerCase() : '';
+  const validActions = ['approve', 'reject'];
+  const validTypes = new Set(['applications', 'interviews', 'assessments']);
+  const requestedTypes = Array.isArray(req.body?.types)
+    ? req.body.types.map((value) => String(value).toLowerCase())
+    : ['applications', 'interviews', 'assessments'];
+  const typeSet = Array.from(new Set(requestedTypes.filter((value) => validTypes.has(value))));
+
+  if (!Number.isFinite(recruiterId) || recruiterId <= 0) {
+    return res.status(400).json({ message: 'recruiterId must be a positive integer.' });
+  }
+  if (!validActions.includes(action)) {
+    return res.status(400).json({ message: 'action must be "approve" or "reject".' });
+  }
+  if (typeSet.length === 0) {
+    return res.status(400).json({ message: 'types must include at least one supported entry.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const summary = {
+      applications: 0,
+      interviews: 0,
+      assessments: 0,
+    };
+
+    if (typeSet.includes('applications')) {
+      const { rows: existingApplications } = await client.query(
+        `
+          SELECT
+            *,
+            (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
+          FROM applications
+          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
+        `,
+        [recruiterId],
+      );
+      if (existingApplications.length > 0) {
+        const applicationIds = existingApplications.map((row) => row.id);
+        if (action === 'approve') {
+          const { rows: updatedApplications } = await client.query(
+            `
+              UPDATE applications
+              SET is_approved = true,
+                  approved_by = $1,
+                  approved_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ANY($2::int[])
+              RETURNING *
+            `,
+            [req.user.userId, applicationIds],
+          );
+          summary.applications = updatedApplications.length;
+          const updatedMap = new Map(updatedApplications.map((row) => [row.id, row]));
+          for (const original of existingApplications) {
+            const updated = updatedMap.get(original.id);
+            if (!updated) continue;
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
+              `,
+              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+            );
+          }
+        } else {
+          const { rows: deletedApplications } = await client.query(
+            `
+              DELETE FROM applications
+              WHERE id = ANY($1::int[])
+              RETURNING *,
+                (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
+            `,
+            [applicationIds],
+          );
+          summary.applications = deletedApplications.length;
+          const datesToRefresh = new Set();
+          for (const row of deletedApplications) {
+            const dateKey = row.application_date
+              ? new Date(row.application_date).toISOString().split('T')[0]
+              : new Date().toISOString().split('T')[0];
+            datesToRefresh.add(dateKey);
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values)
+                VALUES ($1, 'DELETE', 'applications', $2, $3)
+              `,
+              [req.user.userId, row.id, JSON.stringify(row)],
+            );
+            await client.query(
+              `
+                INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                VALUES ($1, 'submission_rejected', 'Application Rejected', $2, 2)
+              `,
+              [
+                recruiterId,
+                `An admin rejected the application for ${row.candidate_name || 'their candidate'}. Please update and resubmit.`,
+              ],
+            );
+          }
+          for (const dateKey of datesToRefresh) {
+            const aggregate = await client.query(
+              `
+                SELECT COALESCE(SUM(applications_count), 0) AS total
+                FROM applications
+                WHERE recruiter_id = $1 AND application_date = $2
+              `,
+              [recruiterId, dateKey],
+            );
+            const totalForDay = Number(aggregate.rows[0]?.total || 0);
+            if (totalForDay > 0) {
+              await client.query(
+                `
+                  INSERT INTO daily_activity (user_id, activity_date, applications_count)
+                  VALUES ($1, $2, $3)
+                  ON CONFLICT (user_id, activity_date)
+                  DO UPDATE SET applications_count = EXCLUDED.applications_count
+                `,
+                [recruiterId, dateKey, totalForDay],
+              );
+            } else {
+              await client.query(
+                `
+                  DELETE FROM daily_activity
+                  WHERE user_id = $1 AND activity_date = $2
+                `,
+                [recruiterId, dateKey],
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (typeSet.includes('interviews')) {
+      const { rows: existingInterviews } = await client.query(
+        `
+          SELECT
+            *,
+            (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
+          FROM interviews
+          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
+        `,
+        [recruiterId],
+      );
+      if (existingInterviews.length > 0) {
+        const interviewIds = existingInterviews.map((row) => row.id);
+        if (action === 'approve') {
+          const { rows: updatedInterviews } = await client.query(
+            `
+              UPDATE interviews
+              SET is_approved = true,
+                  approved_by = $1,
+                  approved_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ANY($2::int[])
+              RETURNING *
+            `,
+            [req.user.userId, interviewIds],
+          );
+          summary.interviews = updatedInterviews.length;
+          const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
+          for (const original of existingInterviews) {
+            const updated = updatedMap.get(original.id);
+            if (!updated) continue;
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+              `,
+              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+            );
+          }
+        } else {
+          const { rows: updatedInterviews } = await client.query(
+            `
+              UPDATE interviews
+              SET is_approved = false,
+                  status = CASE WHEN status = 'rejected' THEN status ELSE 'rejected' END,
+                  approved_by = NULL,
+                  approved_at = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ANY($1::int[])
+              RETURNING *,
+                (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
+            `,
+            [interviewIds],
+          );
+          summary.interviews = updatedInterviews.length;
+          const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
+          for (const original of existingInterviews) {
+            const updated = updatedMap.get(original.id);
+            if (!updated) continue;
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+              `,
+              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+            );
+            await client.query(
+              `
+                INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                VALUES ($1, 'submission_rejected', 'Interview Rejected', $2, 2)
+              `,
+              [
+                recruiterId,
+                `An admin rejected the interview for ${original.candidate_name || 'their candidate'}. Please review the details and resubmit.`,
+              ],
+            );
+          }
+        }
+      }
+    }
+
+    if (typeSet.includes('assessments')) {
+      const { rows: existingAssessments } = await client.query(
+        `
+          SELECT
+            *,
+            (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
+          FROM assessments
+          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
+        `,
+        [recruiterId],
+      );
+      if (existingAssessments.length > 0) {
+        const assessmentIds = existingAssessments.map((row) => row.id);
+        if (action === 'approve') {
+          const { rows: updatedAssessments } = await client.query(
+            `
+              UPDATE assessments
+              SET is_approved = true,
+                  approved_by = $1,
+                  approved_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ANY($2::int[])
+              RETURNING *
+            `,
+            [req.user.userId, assessmentIds],
+          );
+          summary.assessments = updatedAssessments.length;
+          const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
+          for (const original of existingAssessments) {
+            const updated = updatedMap.get(original.id);
+            if (!updated) continue;
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+              `,
+              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+            );
+          }
+        } else {
+          const { rows: updatedAssessments } = await client.query(
+            `
+              UPDATE assessments
+              SET is_approved = false,
+                  approved_by = NULL,
+                  approved_at = NULL,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE id = ANY($1::int[])
+              RETURNING *,
+                (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
+            `,
+            [assessmentIds],
+          );
+          summary.assessments = updatedAssessments.length;
+          const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
+          for (const original of existingAssessments) {
+            const updated = updatedMap.get(original.id);
+            if (!updated) continue;
+            await client.query(
+              `
+                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+              `,
+              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+            );
+            await client.query(
+              `
+                INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                VALUES ($1, 'submission_rejected', 'Assessment Rejected', $2, 2)
+              `,
+              [
+                recruiterId,
+                `An admin rejected the assessment for ${original.candidate_name || 'their candidate'}. Please review and resubmit.`,
+              ],
+            );
+          }
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ action, recruiterId, summary, types: typeSet });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error processing bulk pending approvals:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2717,6 +3377,43 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    const parseLimit = (value, fallback = 6) => {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.min(parsed, 50);
+      }
+      return fallback;
+    };
+
+    const parseOffset = (value) => {
+      const parsed = parseInt(value, 10);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return parsed;
+      }
+      return 0;
+    };
+
+    const assignedCandidatesLimit = parseLimit(req.query.assignedCandidatesLimit, 6);
+    const assignedCandidatesOffset = parseOffset(req.query.assignedCandidatesOffset);
+
+    const recentApplicationsLimit = parseLimit(req.query.recentApplicationsLimit, 6);
+    const recentApplicationsOffset = parseOffset(req.query.recentApplicationsOffset);
+
+    const upcomingInterviewsLimit = parseLimit(req.query.upcomingInterviewsLimit, 6);
+    const upcomingInterviewsOffset = parseOffset(req.query.upcomingInterviewsOffset);
+
+    const pendingAssessmentsLimit = parseLimit(req.query.pendingAssessmentsLimit, 6);
+    const pendingAssessmentsOffset = parseOffset(req.query.pendingAssessmentsOffset);
+
+    const recentNotesLimit = parseLimit(req.query.recentNotesLimit, 6);
+    const recentNotesOffset = parseOffset(req.query.recentNotesOffset);
+
+    const upcomingRemindersLimit = parseLimit(req.query.upcomingRemindersLimit, 6);
+    const upcomingRemindersOffset = parseOffset(req.query.upcomingRemindersOffset);
+
+    const openAlertsLimit = parseLimit(req.query.openAlertsLimit, 6);
+    const openAlertsOffset = parseOffset(req.query.openAlertsOffset);
+
     const userResult = await pool.query(
       `
         SELECT id, name, email, role, daily_quota, is_active, created_at, updated_at
@@ -2732,8 +3429,16 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
 
     const [
       applicationMetricsResult,
+      applicationTodayMetricsResult,
       interviewMetricsResult,
       assessmentMetricsResult,
+      assignedCandidatesResult,
+      recentApplicationsResult,
+      upcomingInterviewsResult,
+      pendingAssessmentsResult,
+      recentNotesResult,
+      upcomingRemindersResult,
+      openAlertsResult,
     ] = await Promise.all([
       pool.query(
         `
@@ -2743,6 +3448,18 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
             COALESCE(SUM(CASE WHEN COALESCE(is_approved, false) THEN 0 ELSE applications_count END), 0) AS pending
           FROM applications
           WHERE recruiter_id = $1
+        `,
+        [userId],
+      ),
+      pool.query(
+        `
+          SELECT
+            COALESCE(SUM(applications_count), 0) AS total,
+            COALESCE(SUM(CASE WHEN COALESCE(is_approved, false) THEN applications_count ELSE 0 END), 0) AS approved,
+            COALESCE(SUM(CASE WHEN COALESCE(is_approved, false) THEN 0 ELSE applications_count END), 0) AS pending
+          FROM applications
+          WHERE recruiter_id = $1
+            AND application_date = CURRENT_DATE
         `,
         [userId],
       ),
@@ -2768,11 +3485,163 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
         `,
         [userId],
       ),
+      pool.query(
+        `
+          SELECT
+            c.id,
+            c.name,
+            c.email,
+            c.current_stage AS "currentStage",
+            COALESCE(app_metrics.today_apps, 0) AS "todayApplications",
+            COALESCE(app_metrics.total_apps, 0) AS "totalApplications",
+            c.updated_at
+          FROM candidates c
+          LEFT JOIN (
+            SELECT
+              candidate_id,
+              SUM(applications_count) AS total_apps,
+              SUM(CASE WHEN application_date = CURRENT_DATE THEN applications_count ELSE 0 END) AS today_apps
+            FROM applications
+            GROUP BY candidate_id
+          ) AS app_metrics ON app_metrics.candidate_id = c.id
+          WHERE c.assigned_recruiter_id = $1
+          ORDER BY c.updated_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, assignedCandidatesLimit + 1, assignedCandidatesOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            a.id,
+            a.company_name AS "companyName",
+            a.job_title AS "jobTitle",
+            a.status,
+            a.application_date AS "applicationDate",
+            a.applications_count AS "applicationsCount",
+            COALESCE(a.is_approved, false) AS "isApproved",
+            c.id AS "candidateId",
+            c.name AS "candidateName"
+          FROM applications a
+          JOIN candidates c ON c.id = a.candidate_id
+          WHERE a.recruiter_id = $1
+          ORDER BY a.application_date DESC, a.created_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, recentApplicationsLimit + 1, recentApplicationsOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            i.id,
+            i.company_name AS "companyName",
+            i.interview_type AS "interviewType",
+            i.scheduled_date AS "scheduledDate",
+            i.status,
+            COALESCE(i.is_approved, false) AS "isApproved",
+            c.id AS "candidateId",
+            c.name AS "candidateName"
+          FROM interviews i
+          JOIN candidates c ON c.id = i.candidate_id
+          WHERE i.recruiter_id = $1
+          ORDER BY i.scheduled_date ASC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, upcomingInterviewsLimit + 1, upcomingInterviewsOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            s.id,
+            s.assessment_platform AS "assessmentPlatform",
+            s.assessment_type AS "assessmentType",
+            s.due_date AS "dueDate",
+            s.status,
+            COALESCE(s.is_approved, false) AS "isApproved",
+            c.id AS "candidateId",
+            c.name AS "candidateName"
+          FROM assessments s
+          JOIN candidates c ON c.id = s.candidate_id
+          WHERE s.recruiter_id = $1
+          ORDER BY
+            CASE WHEN s.status IN ('assigned', 'submitted') THEN 0 ELSE 1 END,
+            s.due_date ASC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, pendingAssessmentsLimit + 1, pendingAssessmentsOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            n.id,
+            n.content,
+            n.created_at AS "createdAt",
+            c.id AS "candidateId",
+            c.name AS "candidateName"
+          FROM notes n
+          LEFT JOIN candidates c ON c.id = n.candidate_id
+          WHERE n.author_id = $1
+          ORDER BY n.created_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, recentNotesLimit + 1, recentNotesOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            r.id,
+            r.title,
+            r.due_date AS "dueDate",
+            r.status,
+            r.priority,
+            c.id AS "candidateId",
+            c.name AS "candidateName"
+          FROM reminders r
+          LEFT JOIN notes n ON n.id = r.note_id
+          LEFT JOIN candidates c ON c.id = n.candidate_id
+          WHERE r.user_id = $1
+          AND r.due_date >= CURRENT_DATE
+          ORDER BY r.due_date ASC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, upcomingRemindersLimit + 1, upcomingRemindersOffset],
+      ),
+      pool.query(
+        `
+          SELECT
+            id,
+            title,
+            message,
+            priority,
+            status,
+            created_at AS "createdAt"
+          FROM alerts
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT $2 OFFSET $3
+        `,
+        [userId, openAlertsLimit + 1, openAlertsOffset],
+      ),
     ]);
 
     const applicationMetrics = applicationMetricsResult.rows[0] || {};
+    const applicationTodayMetrics = applicationTodayMetricsResult.rows[0] || {};
     const interviewMetrics = interviewMetricsResult.rows[0] || {};
     const assessmentMetrics = assessmentMetricsResult.rows[0] || {};
+
+    const makeWindow = (rows, limit) => {
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      return { items, hasMore };
+    };
+
+    const assignedCandidatesWindow = makeWindow(assignedCandidatesResult.rows, assignedCandidatesLimit);
+    const recentApplicationsWindow = makeWindow(recentApplicationsResult.rows, recentApplicationsLimit);
+    const upcomingInterviewsWindow = makeWindow(upcomingInterviewsResult.rows, upcomingInterviewsLimit);
+    const pendingAssessmentsWindow = makeWindow(pendingAssessmentsResult.rows, pendingAssessmentsLimit);
+    const recentNotesWindow = makeWindow(recentNotesResult.rows, recentNotesLimit);
+    const upcomingRemindersWindow = makeWindow(upcomingRemindersResult.rows, upcomingRemindersLimit);
+    const openAlertsWindow = makeWindow(openAlertsResult.rows, openAlertsLimit);
 
     res.json({
       user: userResult.rows[0],
@@ -2781,6 +3650,11 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
           total: Number(applicationMetrics.total || 0),
           approved: Number(applicationMetrics.approved || 0),
           pending: Number(applicationMetrics.pending || 0),
+        },
+        applicationsToday: {
+          total: Number(applicationTodayMetrics.total || 0),
+          approved: Number(applicationTodayMetrics.approved || 0),
+          pending: Number(applicationTodayMetrics.pending || 0),
         },
         interviews: {
           total: Number(interviewMetrics.total || 0),
@@ -2792,6 +3666,112 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
           approved: Number(assessmentMetrics.approved || 0),
           pending: Number(assessmentMetrics.pending || 0),
         },
+      },
+      assignedCandidates: {
+        items: assignedCandidatesWindow.items.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          currentStage: row.currentStage,
+          todayApplications: Number(row.todayApplications || 0),
+          totalApplications: Number(row.totalApplications || 0),
+          updatedAt: row.updated_at,
+        })),
+        hasMore: assignedCandidatesWindow.hasMore,
+        limit: assignedCandidatesLimit,
+        offset: assignedCandidatesOffset,
+        nextOffset: assignedCandidatesOffset + assignedCandidatesLimit,
+      },
+      recentApplications: {
+        items: recentApplicationsWindow.items.map((row) => ({
+          id: row.id,
+          companyName: row.companyName,
+          jobTitle: row.jobTitle,
+          status: row.status,
+          applicationDate: row.applicationDate,
+          applicationsCount: Number(row.applicationsCount || 0),
+          isApproved: row.isApproved,
+          candidateId: row.candidateId,
+          candidateName: row.candidateName,
+        })),
+        hasMore: recentApplicationsWindow.hasMore,
+        limit: recentApplicationsLimit,
+        offset: recentApplicationsOffset,
+        nextOffset: recentApplicationsOffset + recentApplicationsLimit,
+      },
+      upcomingInterviews: {
+        items: upcomingInterviewsWindow.items.map((row) => ({
+          id: row.id,
+          companyName: row.companyName,
+          interviewType: row.interviewType,
+          scheduledDate: row.scheduledDate,
+          status: row.status,
+          isApproved: row.isApproved,
+          candidateId: row.candidateId,
+          candidateName: row.candidateName,
+        })),
+        hasMore: upcomingInterviewsWindow.hasMore,
+        limit: upcomingInterviewsLimit,
+        offset: upcomingInterviewsOffset,
+        nextOffset: upcomingInterviewsOffset + upcomingInterviewsLimit,
+      },
+      pendingAssessments: {
+        items: pendingAssessmentsWindow.items.map((row) => ({
+          id: row.id,
+          assessmentPlatform: row.assessmentPlatform,
+          assessmentType: row.assessmentType,
+          dueDate: row.dueDate,
+          status: row.status,
+          isApproved: row.isApproved,
+          candidateId: row.candidateId,
+          candidateName: row.candidateName,
+        })),
+        hasMore: pendingAssessmentsWindow.hasMore,
+        limit: pendingAssessmentsLimit,
+        offset: pendingAssessmentsOffset,
+        nextOffset: pendingAssessmentsOffset + pendingAssessmentsLimit,
+      },
+      recentNotes: {
+        items: recentNotesWindow.items.map((row) => ({
+          id: row.id,
+          content: row.content,
+          createdAt: row.createdAt,
+          candidateId: row.candidateId,
+          candidateName: row.candidateName,
+        })),
+        hasMore: recentNotesWindow.hasMore,
+        limit: recentNotesLimit,
+        offset: recentNotesOffset,
+        nextOffset: recentNotesOffset + recentNotesLimit,
+      },
+      upcomingReminders: {
+        items: upcomingRemindersWindow.items.map((row) => ({
+          id: row.id,
+          title: row.title,
+          dueDate: row.dueDate,
+          status: row.status,
+          priority: row.priority,
+          candidateId: row.candidateId,
+          candidateName: row.candidateName,
+        })),
+        hasMore: upcomingRemindersWindow.hasMore,
+        limit: upcomingRemindersLimit,
+        offset: upcomingRemindersOffset,
+        nextOffset: upcomingRemindersOffset + upcomingRemindersLimit,
+      },
+      openAlerts: {
+        items: openAlertsWindow.items.map((row) => ({
+          id: row.id,
+          title: row.title,
+          message: row.message,
+          priority: row.priority,
+          status: row.status,
+          createdAt: row.createdAt,
+        })),
+        hasMore: openAlertsWindow.hasMore,
+        limit: openAlertsLimit,
+        offset: openAlertsOffset,
+        nextOffset: openAlertsOffset + openAlertsLimit,
       },
     });
   } catch (error) {

@@ -292,7 +292,7 @@ const AdminRecruitersPage = () => {
               </div>
             ) : recruiters.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No recruiters yet. Use â€œAdd Recruiterâ€ to invite a teammate.
+                No recruiters yet. Use &quot;Add Recruiter&quot; to invite a teammate.
               </p>
             ) : (
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">

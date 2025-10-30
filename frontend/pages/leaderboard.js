@@ -32,8 +32,9 @@ const LeaderboardPage = () => {
   }, [router]);
 
   const { data, isLoading } = useLeaderboardQuery(token, Boolean(token));
-  const leaderboard = data?.leaderboard ?? [];
-  const generatedAt = data?.generatedAt ?? null;
+
+  const leaderboard = useMemo(() => data?.leaderboard ?? [], [data?.leaderboard]);
+  const generatedAt = useMemo(() => data?.generatedAt ?? null, [data?.generatedAt]);
 
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Admin') {
@@ -69,6 +70,13 @@ const LeaderboardPage = () => {
     };
   }, [leaderboard]);
 
+  const handleNavigateToRecruiter = (recruiterId) => {
+    if (!recruiterId) {
+      return;
+    }
+    router.push(`/recruiter/profile/${recruiterId}`);
+  };
+
   return (
     <DashboardLayout
       title="Recruiter Leaderboard"
@@ -101,7 +109,18 @@ const LeaderboardPage = () => {
           </div>
 
           {topPerformer && (
-            <Card className="p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-amber-100 via-white to-amber-100 border-amber-200">
+            <Card
+              role="button"
+              tabIndex={0}
+              onClick={() => handleNavigateToRecruiter(topPerformer.recruiterId)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  handleNavigateToRecruiter(topPerformer.recruiterId);
+                }
+              }}
+              className="p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-amber-100 via-white to-amber-100 border-amber-200 cursor-pointer transition hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+            >
               <div className="flex items-center gap-4">
                 <div className="h-12 w-12 rounded-full bg-amber-500/20 flex items-center justify-center">
                   <Trophy className="h-7 w-7 text-amber-600" />
@@ -110,7 +129,7 @@ const LeaderboardPage = () => {
                   <p className="text-sm font-medium text-muted-foreground uppercase">Top Performer</p>
                   <p className="text-xl font-semibold text-foreground">{topPerformer.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {topPerformer.weekApplications} applications this week · {topPerformer.todayApplications} today
+                    {topPerformer.weekApplications} applications this week {'\u00B7'} {topPerformer.todayApplications} today
                   </p>
                 </div>
               </div>
@@ -151,12 +170,16 @@ const LeaderboardPage = () => {
                         </Badge>
                       </td>
                       <td className="px-6 py-3">
-                        <div className="flex flex-col">
+                        <button
+                          type="button"
+                          onClick={() => handleNavigateToRecruiter(entry.recruiterId)}
+                          className="flex w-full flex-col text-left bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded"
+                        >
                           <span className="text-sm font-semibold text-foreground">{entry.name}</span>
                           <span className="text-xs text-muted-foreground">
-                            {entry.totalApplications} lifetime apps · quota {entry.dailyQuota}
+                            {entry.totalApplications} lifetime apps {'\u00B7'} quota {entry.dailyQuota}
                           </span>
-                        </div>
+                        </button>
                       </td>
                       <td className="px-6 py-3 text-sm text-foreground">{entry.todayApplications}</td>
                       <td className="px-6 py-3 text-sm text-foreground">{entry.weekApplications}</td>

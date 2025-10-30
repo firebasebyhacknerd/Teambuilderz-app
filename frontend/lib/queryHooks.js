@@ -29,8 +29,8 @@ export const queryKeys = {
   candidates: (token) => ['candidates', token],
   reports: (token, scope) => ['reports', scope, token],
   candidateNotes: (token, candidateId) => ['candidate-notes', token, candidateId],
-  adminOverview: (token) => ['admin-overview', token],
-  adminActivity: (token) => ['admin-activity', token],
+  adminOverview: (token, paramsKey) => ['admin-overview', token, paramsKey ?? null],
+  adminActivity: (token, paramsKey) => ['admin-activity', token, paramsKey ?? null],
   notifications: (token) => ['notifications', token],
   userActivity: (token) => ['user-activity', token],
   users: (token) => ['users', token],
@@ -38,7 +38,7 @@ export const queryKeys = {
   candidateAssignments: (token, candidateId) => ['candidate-assignments', token, candidateId],
   interviews: (token, params) => ['interviews', token, params ? JSON.stringify(params) : null],
   assessments: (token, params) => ['assessments', token, params ? JSON.stringify(params) : null],
-  recruiterProfile: (token, userId) => ['recruiter-profile', token, userId],
+  recruiterProfile: (token, userId, paramsKey) => ['recruiter-profile', token, userId, paramsKey ?? null],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -484,11 +484,12 @@ export const useDeleteCandidateNoteMutation = (token, candidateId, options = {})
   });
 };
 
-export const useAdminOverviewQuery = (token, enabled = true) =>
+export const useAdminOverviewQuery = (token, enabled = true, params = {}) =>
   useQuery({
-    queryKey: queryKeys.adminOverview(token),
+    queryKey: queryKeys.adminOverview(token, JSON.stringify(params ?? {})),
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/api/v1/reports/overview`, {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/reports/overview${query}`, {
         headers: buildHeaders(token),
       });
       return handleResponse(response, 'Unable to load overview metrics.');
@@ -497,11 +498,12 @@ export const useAdminOverviewQuery = (token, enabled = true) =>
     placeholderData: null,
   });
 
-export const useAdminActivityQuery = (token, enabled = true) =>
+export const useAdminActivityQuery = (token, enabled = true, params = {}) =>
   useQuery({
-    queryKey: queryKeys.adminActivity(token),
+    queryKey: queryKeys.adminActivity(token, JSON.stringify(params ?? {})),
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/api/v1/reports/activity`, {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/reports/activity${query}`, {
         headers: buildHeaders(token),
       });
       return handleResponse(response, 'Unable to load recent activity.');
@@ -512,6 +514,12 @@ export const useAdminActivityQuery = (token, enabled = true) =>
       upcomingReminders: [],
       recruiterNotes: [],
       notesByRecruiter: [],
+      pendingApprovals: {
+        applications: [],
+        interviews: [],
+        assessments: [],
+      },
+      recentApprovals: [],
     },
     refetchInterval: 30000,
   });
@@ -572,11 +580,13 @@ export const useCandidateAssignmentsQuery = (token, candidateId, enabled = true)
     refetchInterval: 30000,
   });
 
-export const useRecruiterProfileQuery = (token, userId, enabled = true) =>
-  useQuery({
-    queryKey: queryKeys.recruiterProfile(token, userId),
+export const useRecruiterProfileQuery = (token, userId, params = {}, enabled = true) => {
+  const queryKeyParams = JSON.stringify(params ?? {});
+  return useQuery({
+    queryKey: queryKeys.recruiterProfile(token, userId, queryKeyParams),
     queryFn: async () => {
-      const response = await fetch(`${API_URL}/api/v1/users/${userId}/profile`, {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/users/${userId}/profile${query}`, {
         headers: buildHeaders(token),
       });
       return handleResponse(response, 'Unable to load recruiter profile.');
@@ -584,6 +594,7 @@ export const useRecruiterProfileQuery = (token, userId, enabled = true) =>
     enabled: Boolean(token) && Boolean(userId) && enabled,
     retry: false,
   });
+};
 
 export const useUsersQuery = (token, enabled = true) =>
   useQuery({

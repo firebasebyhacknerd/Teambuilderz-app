@@ -730,7 +730,7 @@ const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, 
             </Button>
           </DialogClose>
           <Button type="submit" disabled={isSaving}>
-            {isSaving ? 'Savingâ€¦' : candidate ? 'Update Candidate' : 'Create Candidate'}
+            {isSaving ? 'Saving…' : candidate ? 'Update Candidate' : 'Create Candidate'}
           </Button>
         </DialogFooter>
       </form>
