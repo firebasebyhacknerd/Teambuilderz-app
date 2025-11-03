@@ -108,6 +108,7 @@ const AdminCandidates = () => {
       setError('');
 
       const candidatesRes = await fetch(`${API_URL}/api/v1/candidates`, {
+        credentials: 'include',
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -127,6 +128,7 @@ const AdminCandidates = () => {
 
       if (userRole === 'Admin') {
         const recruitersRes = await fetch(`${API_URL}/api/v1/users`, {
+          credentials: 'include',
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -331,6 +333,7 @@ const AdminCandidates = () => {
 
       const response = await fetch(`${API_URL}${endpoint}`, {
         method,
+        credentials: 'include',
         headers: {
           Authorization: `Bearer ${authToken}`,
           'Content-Type': 'application/json'
@@ -369,6 +372,7 @@ const AdminCandidates = () => {
       setError('');
       const response = await fetch(`${API_URL}/api/v1/candidates/${candidateId}`, {
         method: 'DELETE',
+        credentials: 'include',
         headers: { Authorization: `Bearer ${authToken}` }
       });
 

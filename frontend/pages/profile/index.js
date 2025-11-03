@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { track } from '../../lib/analytics';
+import API_URL from '../../lib/api';
 
 const initialFormState = {
   name: '',
@@ -46,10 +47,8 @@ export default function ProfilePage() {
       try {
         setLoading(true);
         setError('');
-        const response = await fetch('/api/v1/profile', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+        const response = await fetch(`${API_URL}/api/v1/profile`, {
+          credentials: 'include',
         });
 
         if (!response.ok) {
@@ -132,10 +131,10 @@ export default function ProfilePage() {
         payload.password = form.password;
       }
 
-      const response = await fetch('/api/v1/profile', {
+      const response = await fetch(`${API_URL}/api/v1/profile`, {
         method: 'PUT',
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
@@ -272,3 +271,4 @@ export default function ProfilePage() {
     </DashboardLayout>
   );
 }
+

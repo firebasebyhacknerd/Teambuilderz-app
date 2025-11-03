@@ -14,6 +14,7 @@ import {
   CircleUser,
 } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import API_URL from '../../lib/api';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -224,7 +225,15 @@ const AdminRecruitersPage = () => {
     });
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (logoutError) {
+      console.warn('Failed to log out cleanly', logoutError);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');

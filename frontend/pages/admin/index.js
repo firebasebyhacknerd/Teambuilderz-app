@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
@@ -354,7 +354,15 @@ const applicationsTodayDetails = (
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (logoutError) {
+      console.warn('Failed to log out cleanly', logoutError);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');
@@ -468,7 +476,7 @@ const applicationsTodayDetails = (
           title="Candidate roster"
           value={summary.totalCandidates}
           accent="bg-primary/10 text-primary"
-          details={`${numberFormatter.format(summary.marketingCandidates || 0)} marketing · ${numberFormatter.format(
+          details={`${numberFormatter.format(summary.marketingCandidates || 0)} marketing Â· ${numberFormatter.format(
             summary.activeCandidates || 0,
           )} active`}
           actionLabel="Open candidates"
@@ -993,9 +1001,9 @@ const RecentApprovalsCard = ({ approvals, dateTimeFormatter }) => {
               label: humanizeLabel(item.decision),
             };
             const Icon = meta.icon;
-            const timestamp = item.createdAt ? dateTimeFormatter.format(new Date(item.createdAt)) : '—';
+            const timestamp = item.createdAt ? dateTimeFormatter.format(new Date(item.createdAt)) : 'â€”';
             const candidateName = item.candidate?.name ?? 'Unknown candidate';
-            const recruiterName = item.recruiter?.name ? ` • ${item.recruiter.name}` : '';
+            const recruiterName = item.recruiter?.name ? ` â€¢ ${item.recruiter.name}` : '';
             const actorName = item.actor?.name ?? 'System';
 
             return (

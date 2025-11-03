@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 import { addListener, flushAnalytics, getAnalyticsState } from '../../lib/analytics';

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -11,7 +11,7 @@ import ActivityPulse from '../analytics/ActivityPulse';
  * a header row that can show a back button plus contextual actions.
  *
  * Props:
- * - title: string – page heading
+ * - title: string â€“ page heading
  * - subtitle: string (optional)
  * - links: array of { href, label, icon } for the sidebar navigation
  * - actions: React nodes rendered on the right side of the header

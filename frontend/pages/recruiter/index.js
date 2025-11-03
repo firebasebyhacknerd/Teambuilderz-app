@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, CircleUser, Home, TrendingUp, Clock } from 'lucide-react';
 import { Card } from '../../components/ui/card';
@@ -225,7 +225,15 @@ const RecruiterDashboard = () => {
     router.push('/alerts');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (logoutError) {
+      console.warn('Failed to log out cleanly', logoutError);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');

@@ -103,6 +103,7 @@ function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
       }
 
       const token = jwtLib.sign({ userId: user.id, role: user.role }, secret, { expiresIn: '1d' });
+      res.cookie(AUTH_COOKIE_NAME, token, COOKIE_OPTIONS);
 
       await db.query(
         `
@@ -124,7 +125,7 @@ function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
         }),
       );
 
-      res.json({ token, role: user.role, name: user.name, id: user.id });
+      res.json({ role: user.role, name: user.name, id: user.id });
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ message: 'Internal server error during login.' });
@@ -132,11 +133,26 @@ function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
   };
 }
 
+const AUTH_COOKIE_NAME = 'tbz_auth';
+const COOKIE_OPTIONS = {\n  httpOnly: true,\n  sameSite: 'lax',\n  secure: process.env.NODE_ENV === 'production',\n  maxAge: 24 * 60 * 60 * 1000,\n};\nconst CLEAR_COOKIE_OPTIONS = {\n  httpOnly: true,\n  sameSite: 'lax',\n  secure: process.env.NODE_ENV === 'production',\n};\nconst ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')\n  .split(',')\n  .map((origin) => origin.trim())\n  .filter(Boolean);
+
 const authLimiter = createLimiter({
   windowMs: 5 * 60 * 1000,
   max: 10,
   name: 'auth-login',
   message: { message: 'Too many login attempts. Please try again after 5 minutes.' },
+});
+const analyticsLimiter = createLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  name: 'analytics-intake',
+  message: { message: 'Too many analytics events. Please slow down.' },
+});
+const profileLimiter = createLimiter({
+  windowMs: 60 * 1000,
+  max: 10,
+  name: 'profile-update',
+  message: { message: 'Too many profile updates. Please try again shortly.' },
 });
 
 // Database Connection Setup
@@ -149,7 +165,11 @@ const pool = new Pool({
 });
 
 // Middleware
-app.use(composeMiddleware([cors(), bodyParser.json()]));
+app.use(
+  composeMiddleware([\n    cors({\n      origin: (origin, callback) => {\n        if (!origin || ALLOWED_ORIGINS.includes(origin)) {\n          callback(null, true);\n        } else {\n          callback(new Error('Not allowed by CORS'));\n        }\n      },\n      credentials: true,\n    }),
+    bodyParser.json(),
+  ]),
+);
 
 // Routes
 app.get('/', (req, res) => {
@@ -532,9 +552,41 @@ async function setupDatabase() {
   }
 }
 
+function parseCookies(cookieHeader) {
+  if (!cookieHeader) {
+    return {};
+  }
+  return cookieHeader.split(';').reduce((acc, part) => {
+    const [rawKey, ...rawVal] = part.split('=');
+    if (!rawKey || rawVal.length === 0) {
+      return acc;
+    }
+    const key = rawKey.trim();
+    const value = rawVal.join('=').trim();
+    acc[key] = decodeURIComponent(value);
+    return acc;
+  }, {});
+}
+
+function getTokenFromRequest(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const rawToken = authHeader.slice(7).trim();
+    if (rawToken && rawToken !== 'session') {
+      return rawToken;
+    }
+  }
+
+  const cookies = parseCookies(req.headers?.cookie);
+  if (cookies[AUTH_COOKIE_NAME]) {
+    return cookies[AUTH_COOKIE_NAME];
+  }
+  return null;
+}
+
 // Middleware to verify JWT token
 const verifyToken = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
+  const token = getTokenFromRequest(req);
 
   if (!token) {
     return res.status(401).json({ message: 'No token provided' });
@@ -607,7 +659,12 @@ const loginHandler = createLoginHandler({
 // Authentication Route
 app.post('/api/v1/auth/login', authLimiter, loginHandler);
 
-app.post('/api/v1/analytics', (req, res) => {
+app.post('/api/v1/auth/logout', (req, res) => {
+  res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
+  res.status(204).end();
+});
+
+app.post('/api/v1/analytics', analyticsLimiter, verifyToken, (req, res) => {
   const events = Array.isArray(req.body?.events) ? req.body.events : [];
   const meta = {
     count: events.length,
@@ -640,10 +697,9 @@ app.get('/api/v1/profile', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/v1/profile', verifyToken, async (req, res) => {
+app.put('/api/v1/profile', profileLimiter, verifyToken, async (req, res) => {
   try {
-    const { name, email, password, daily_quota } = req.body;
-
+    const { name, email, password, daily_quota } = req.body;\n\n    if (password) {\n      const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[\\W_]).{8,}$/;\n      if (!passwordPolicy.test(password)) {\n        return res.status(400).json({\n          message: 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.',\n        });\n      }\n    }\n
     const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
@@ -4215,3 +4271,8 @@ async function startServer() {
 }
 
 startServer();
+
+
+
+
+

@@ -1,4 +1,4 @@
-let config = {
+﻿let config = {
   endpoint: '/api/v1/analytics',
   flushInterval: 15000,
   maxBatchSize: 20,
@@ -74,7 +74,7 @@ function scheduleFlush(delay) {
 function getAuthHeaders() {
   if (!canUseStorage()) return {};
   const token = window.localStorage.getItem('token');
-  if (!token) return {};
+  if (!token || token === 'session') return {};
   return { Authorization: `Bearer ${token}` };
 }
 
@@ -94,6 +94,7 @@ async function sendBatch(batch) {
   const response = await fetch(config.endpoint, {
     method: 'POST',
     headers,
+    credentials: 'include',
     body: JSON.stringify({ events: batch }),
   });
 

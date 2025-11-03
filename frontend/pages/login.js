@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { LogIn, User, Lock, Eye, EyeOff } from 'lucide-react';
 import {
@@ -58,6 +58,7 @@ const LoginPage = () => {
       const response = await fetch(API_URL + '/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: trimmedEmail, password: trimmedPassword }),
       });
 
@@ -67,7 +68,7 @@ const LoginPage = () => {
         throw new Error(data.message || 'Login failed.');
       }
 
-      localStorage.setItem('token', data.token);
+      localStorage.setItem('token', 'session');
       localStorage.setItem('userRole', data.role);
       localStorage.setItem('userName', data.name);
       if (data.id) {

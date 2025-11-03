@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp, CircleUser, Edit, Check, X } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import API_URL from '../../lib/api';
 import { track } from '../../lib/analytics';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -257,7 +258,15 @@ const ApplicationsPage = () => {
     ];
   }, [userRole]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (logoutError) {
+      console.warn('Failed to log out cleanly', logoutError);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');

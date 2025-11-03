@@ -38,7 +38,7 @@ const AlertsPage = () => {
       setActionError('');
 
       const response = await fetch(`${API_URL}/api/v1/alerts`, {
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       });
 
       if (response.status === 401 || response.status === 403) {
@@ -133,7 +133,7 @@ const AlertsPage = () => {
 
       const response = await fetch(`${API_URL}/api/v1/alerts/${alertId}/${action}`, {
         method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+        credentials: 'include',
       });
 
       if (!response.ok) {
@@ -306,4 +306,5 @@ const SummaryCard = ({ icon, title, value, color }) => (
 );
 
 export default AlertsPage;
+
 

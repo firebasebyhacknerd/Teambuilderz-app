@@ -24,6 +24,25 @@ function MyApp({ Component, pageProps }) {
   const router = useRouter();
 
   useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.fetch !== 'function') {
+      return;
+    }
+
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init = {}) => {
+      const nextInit = {
+        credentials: 'include',
+        ...init,
+      };
+      return originalFetch(input, nextInit);
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  useEffect(() => {
     configureAnalytics({
       endpoint: '/api/v1/analytics',
       flushInterval: 15000,
@@ -79,4 +98,5 @@ function MyApp({ Component, pageProps }) {
 }
 
 export default MyApp;
+
 

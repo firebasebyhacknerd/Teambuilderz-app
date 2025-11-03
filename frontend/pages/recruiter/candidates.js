@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { useCandidatesQuery } from '../../lib/queryHooks';
+import API_URL from '../../lib/api';
 
 const stageStyles = {
   onboarding: 'bg-blue-100 text-blue-700',
@@ -81,7 +82,15 @@ const CandidatesPage = () => {
     ];
   }, [userRole]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (logoutError) {
+      console.warn('Failed to log out cleanly', logoutError);
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
     localStorage.removeItem('userName');

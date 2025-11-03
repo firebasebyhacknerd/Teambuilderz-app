@@ -109,6 +109,13 @@ const CandidateDetailPage = () => {
   const timelineToggleInitialized = useRef(false);
   const noteFormRef = useRef(null);
 
+  const candidateId = useMemo(() => {
+    if (!id) return null;
+    const raw = Array.isArray(id) ? id[0] : id;
+    const numericId = parseInt(raw, 10);
+    return Number.isNaN(numericId) ? null : numericId;
+  }, [id]);
+
   useEffect(() => {
     if (!timelineToggleInitialized.current) {
       timelineToggleInitialized.current = true;
@@ -149,12 +156,6 @@ const CandidateDetailPage = () => {
       }));
     }
   }, []);
-
-  const candidateId = useMemo(() => {
-    if (!id) return null;
-    const numericId = Array.isArray(id) ? parseInt(id[0], 10) : parseInt(id, 10);
-    return Number.isNaN(numericId) ? null : numericId;
-  }, [id]);
 
   const { data: candidates = [], isLoading: candidatesLoading } = useCandidatesQuery(token, Boolean(token));
 
@@ -642,7 +643,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
         id: `note-${note.id}`,
         type: 'note',
         timestamp: note.createdAt || note.created_at,
-        title: note.author?.name ? `Note · ${note.author.name}` : 'Note added',
+        title: note.author?.name ? `Note Â· ${note.author.name}` : 'Note added',
         description: note.content,
         badge: note.reminder ? 'Reminder Set' : 'Note',
         tone: note.reminder
@@ -657,7 +658,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
         type: 'interview',
         timestamp: interview.scheduled_date || interview.created_at,
         title: `${formatLabel(interview.interview_type || 'interview')} interview`,
-        description: `${interview.company_name || 'Company not set'} · Round ${interview.round_number || 1}`,
+        description: `${interview.company_name || 'Company not set'} Â· Round ${interview.round_number || 1}`,
         badge: interview.status ? formatLabel(interview.status) : 'Interview',
         tone: interview.is_approved
           ? 'border border-emerald-200 bg-emerald-100 text-emerald-700'
@@ -1059,7 +1060,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span>{formatDateTime(item.timestamp)}</span>
-                      {item.dueDate && <span>� Due {formatDate(item.dueDate)}</span>}
+                      {item.dueDate && <span>• Due {formatDate(item.dueDate)}</span>}
                     </div>
                   </div>
                 </li>
@@ -1115,7 +1116,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
                           {interview.company_name || 'Company not set'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {formatLabel(interview.interview_type)} · Round {interview.round_number || 1}
+                          {formatLabel(interview.interview_type)} Â· Round {interview.round_number || 1}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
