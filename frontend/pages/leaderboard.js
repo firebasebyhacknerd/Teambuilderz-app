@@ -1,6 +1,6 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { Trophy, TrendingUp, Users, Target, Flame, Award, Home, FileText, AlertTriangle, UserCheck } from 'lucide-react';
+import { Trophy, TrendingUp, Users, Target, Flame, Award, Home, FileText, AlertTriangle, UserCheck, CircleUser } from 'lucide-react';
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -45,15 +45,16 @@ const LeaderboardPage = () => {
         { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
         { href: '/recruiter/applications', label: 'Applications', icon: FileText },
         { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+        { href: '/profile', label: 'My Profile', icon: CircleUser },
       ];
     }
 
     return [
-      { href: '/recruiter', label: 'Dashboard', icon: Home },
+      { href: '/recruiter', label: 'Dashboard', icon: Target },
       { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-      { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
       { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+      { href: '/profile', label: 'My Profile', icon: CircleUser },
     ];
   }, [userRole]);
 
@@ -219,5 +220,6 @@ const SummaryCard = ({ icon, title, value, accent }) => (
 );
 
 export default LeaderboardPage;
+
 
 

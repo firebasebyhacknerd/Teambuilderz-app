@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Plus,
@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   User,
   TrendingUp,
+  CircleUser,
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -29,6 +30,7 @@ import {
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
 import { useCandidateAssignmentsQuery } from '../../lib/queryHooks';
+import { track } from '../../lib/analytics';
 
 const stageBadges = {
   onboarding: 'bg-blue-100 text-blue-800',
@@ -47,7 +49,15 @@ const sidebarLinks = [
   { href: '/admin/recruiters', label: 'Team Management', icon: User },
   { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-  { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+  { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+  { href: '/profile', label: 'My Profile', icon: CircleUser }
+];
+
+const filterPresets = [
+  { id: 'new-talent', label: 'New Talent', stage: 'onboarding', source: 'default' },
+  { id: 'market-ready', label: 'Market Ready', stage: 'marketing', source: 'default' },
+  { id: 'interviewing', label: 'Interview Pipeline', stage: 'interviewing', source: 'default' },
+  { id: 'offers', label: 'Offers & Placements', stage: 'offered', source: 'default' },
 ];
 
 const AdminCandidates = () => {
@@ -64,6 +74,8 @@ const AdminCandidates = () => {
   const [editingCandidate, setEditingCandidate] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [recentFilters, setRecentFilters] = useState([]);
+  const filterHistoryRef = useRef(false);
 
   const openCreateDialog = () => {
     setEditingCandidate(null);
@@ -140,6 +152,81 @@ const AdminCandidates = () => {
     fetchData();
   }, [fetchData]);
 
+  const stageLabel = useCallback(
+    (stage) => (stage ? stage.charAt(0).toUpperCase() + stage.slice(1) : 'All Stages'),
+    [],
+  );
+
+  const getRecruiterName = useCallback(
+    (id) => recruiters.find((recruiter) => String(recruiter.id) === String(id))?.name ?? 'All Recruiters',
+    [recruiters],
+  );
+
+  const clearFilters = useCallback(() => {
+    setSearchTerm('');
+    setStageFilter('');
+    setRecruiterFilter('');
+  }, [setSearchTerm, setStageFilter, setRecruiterFilter]);
+
+  const applyFilterPreset = useCallback(
+    (preset) => {
+      setStageFilter(preset.stage ?? '');
+      setRecruiterFilter(preset.recruiter ?? '');
+      if (preset.searchTerm !== undefined) {
+        setSearchTerm(preset.searchTerm);
+      }
+      track('admin_filter_preset_clicked', {
+        presetId: preset.id,
+        stage: preset.stage ?? null,
+        recruiter: preset.recruiter ?? null,
+        source: preset.source ?? 'custom',
+      });
+    },
+    [setStageFilter, setRecruiterFilter, setSearchTerm],
+  );
+
+  const presetIsActive = useCallback(
+    (preset) => stageFilter === (preset.stage ?? '') && recruiterFilter === (preset.recruiter ?? ''),
+    [stageFilter, recruiterFilter],
+  );
+
+  const applyRecentFilter = useCallback(
+    (entry) => {
+      setStageFilter(entry.stage || '');
+      setRecruiterFilter(entry.recruiter || '');
+      track('admin_recent_filter_clicked', {
+        signature: entry.signature,
+        stage: entry.stage ?? null,
+        recruiter: entry.recruiter ?? null,
+      });
+    },
+    [setStageFilter, setRecruiterFilter],
+  );
+
+  useEffect(() => {
+    if (!filterHistoryRef.current) {
+      filterHistoryRef.current = true;
+      return;
+    }
+
+    const signature = `${stageFilter || 'all'}::${recruiterFilter || 'all'}`;
+    if (signature === 'all::all') {
+      return;
+    }
+
+    const labelParts = [stageLabel(stageFilter)];
+    labelParts.push(recruiterFilter ? getRecruiterName(recruiterFilter) : 'All Recruiters');
+    const label = labelParts.join(' · ');
+
+    setRecentFilters((prev) => {
+      const withoutCurrent = prev.filter((entry) => entry.signature !== signature);
+      return [
+        { signature, label, stage: stageFilter, recruiter: recruiterFilter },
+        ...withoutCurrent,
+      ].slice(0, 4);
+    });
+  }, [stageFilter, recruiterFilter, getRecruiterName, stageLabel]);
+
   const filteredCandidates = useMemo(() => {
     return candidates
       .filter((candidate) => {
@@ -156,14 +243,69 @@ const AdminCandidates = () => {
   }, [candidates, searchTerm, stageFilter, recruiterFilter]);
 
   const summary = useMemo(() => {
+    const stageCounts = candidates.reduce((acc, candidate) => {
+      const stageKey = candidate.current_stage || 'unassigned';
+      acc[stageKey] = (acc[stageKey] || 0) + 1;
+      return acc;
+    }, {});
+
     const activeCount = candidates.filter((candidate) => candidate.current_stage !== 'inactive').length;
     return {
       total: candidates.length,
       active: activeCount,
       inactive: candidates.length - activeCount,
-      recruiters: new Set(candidates.map((candidate) => candidate.recruiter_name).filter(Boolean)).size
+      recruiters: new Set(candidates.map((candidate) => candidate.recruiter_name).filter(Boolean)).size,
+      stageCounts
     };
   }, [candidates]);
+
+  const smartPresets = useMemo(() => {
+    if (!summary.stageCounts) {
+      return [];
+    }
+
+    const suggestions = [];
+    const entries = Object.entries(summary.stageCounts);
+
+    const topActiveStage = entries
+      .filter(([stage]) => stage !== 'inactive')
+      .sort((a, b) => b[1] - a[1])[0];
+
+    if (topActiveStage) {
+      const [stage, count] = topActiveStage;
+      suggestions.push({
+        id: `smart-top-${stage}`,
+        label: `High Volume: ${stageLabel(stage)}`,
+        stage,
+        badge: `${count} candidates`,
+        source: 'smart',
+      });
+    }
+
+    const inactiveCount = summary.stageCounts.inactive;
+    if (inactiveCount) {
+      suggestions.push({
+        id: 'smart-reengage',
+        label: 'Re-engage Inactive',
+        stage: 'inactive',
+        badge: `${inactiveCount} need attention`,
+        source: 'smart',
+      });
+    }
+
+    const marketingCount = summary.stageCounts.marketing;
+    if (marketingCount && marketingCount >= 3 && (!topActiveStage || topActiveStage[0] !== 'marketing')) {
+      suggestions.push({
+        id: 'smart-marketing',
+        label: 'Marketing Push',
+        stage: 'marketing',
+        badge: `${marketingCount} actively marketing`,
+        source: 'smart',
+      });
+    }
+
+    return suggestions.slice(0, 3);
+  }, [summary.stageCounts, stageLabel]);
 
   const handleCandidateSave = async (formData, resetForm) => {
     const authToken = token || localStorage.getItem('token');
@@ -324,7 +466,7 @@ const AdminCandidates = () => {
                 <option value="">All Stages</option>
                 {stages.map((stage) => (
                   <option key={stage} value={stage}>
-                    {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                    {stageLabel(stage)}
                   </option>
                 ))}
               </select>
@@ -351,16 +493,64 @@ const AdminCandidates = () => {
               </Button>
               <Button
                 variant="ghost"
-                onClick={() => {
-                  setSearchTerm('');
-                  setStageFilter('');
-                  setRecruiterFilter('');
-                }}
+                onClick={clearFilters}
               >
                 Reset
               </Button>
             </div>
           </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Saved Presets</span>
+            {filterPresets.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                size="sm"
+                variant={presetIsActive(preset) ? 'default' : 'outline'}
+                className="h-7 text-xs"
+                onClick={() => applyFilterPreset(preset)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+
+          {smartPresets.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Smart Suggestions</span>
+              {smartPresets.map((preset) => (
+                <Button
+                  key={preset.id}
+                  type="button"
+                  size="sm"
+                  variant={presetIsActive(preset) ? 'default' : 'secondary'}
+                  className="h-7 text-xs"
+                  onClick={() => applyFilterPreset(preset)}
+                  title={preset.badge}
+                >
+                  {preset.label}
+                  {preset.badge && <span className="ml-2 text-[10px] uppercase tracking-wide">{preset.badge}</span>}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {recentFilters.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Recently Used</span>
+              {recentFilters.map((entry) => (
+                <Badge
+                  key={entry.signature}
+                  variant="secondary"
+                  className="cursor-pointer hover:bg-primary/10 transition"
+                  onClick={() => applyRecentFilter(entry)}
+                >
+                  {entry.label}
+                </Badge>
+              ))}
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             {stages.map((stage) => (
@@ -370,7 +560,7 @@ const AdminCandidates = () => {
                 className="cursor-pointer"
                 onClick={() => setStageFilter(stageFilter === stage ? '' : stage)}
               >
-                {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                {stageLabel(stage)}
               </Badge>
             ))}
           </div>
@@ -641,7 +831,7 @@ const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, 
             >
               {stages.map((stage) => (
                 <option key={stage} value={stage}>
-                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                  {stageLabel(stage)}
                 </option>
               ))}
             </select>
@@ -739,6 +929,7 @@ const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, 
 };
 
 export default AdminCandidates;
+
 
 
 

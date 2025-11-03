@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { User, Users, FileText, Target, AlertTriangle, ChevronRight } from 'lucide-react';
+import { User, Users, FileText, Target, AlertTriangle, CircleUser, ChevronRight } from 'lucide-react';
 import DashboardLayout from '../../../components/Layout/DashboardLayout';
 import { Card } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
@@ -14,6 +14,7 @@ const buildSidebarLinks = (role) => {
       { href: '/admin/candidates', label: 'Candidates', icon: User },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
       { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+      { href: '/profile', label: 'My Profile', icon: CircleUser },
     ];
   }
 
@@ -22,6 +23,7 @@ const buildSidebarLinks = (role) => {
     { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    { href: '/profile', label: 'My Profile', icon: CircleUser },
   ];
 };
 

@@ -1,7 +1,9 @@
 import '../styles/globals.css';
 import Head from 'next/head';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { configureAnalytics, flushAnalytics, track } from '../lib/analytics';
 
 function MyApp({ Component, pageProps }) {
   const [queryClient] = useState(
@@ -19,6 +21,48 @@ function MyApp({ Component, pageProps }) {
         },
       }),
   );
+  const router = useRouter();
+
+  useEffect(() => {
+    configureAnalytics({
+      endpoint: '/api/v1/analytics',
+      flushInterval: 15000,
+      maxBatchSize: 25,
+    });
+
+    if (typeof document !== 'undefined') {
+      const handleVisibility = () => {
+        if (document.visibilityState === 'hidden') {
+          flushAnalytics('visibility');
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibility);
+
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      };
+    }
+
+    return undefined;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleBeforeUnload = () => flushAnalytics('beforeunload');
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    track('page_view', {
+      path: router.asPath,
+    });
+  }, [router.asPath, router.isReady]);
 
   return (
     <>
@@ -35,3 +79,4 @@ function MyApp({ Component, pageProps }) {
 }
 
 export default MyApp;
+

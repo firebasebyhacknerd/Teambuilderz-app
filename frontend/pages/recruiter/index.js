@@ -1,6 +1,6 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, Home, TrendingUp, Clock } from 'lucide-react';
+import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, CircleUser, Home, TrendingUp, Clock } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -238,7 +238,8 @@ const RecruiterDashboard = () => {
     { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    { href: '/profile', label: 'My Profile', icon: CircleUser },
   ];
 
   if (loading || metricsLoading) {
@@ -648,6 +649,8 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
+
+
 
 
 

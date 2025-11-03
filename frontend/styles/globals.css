@@ -4,67 +4,74 @@
 
 @layer base {
   :root {
-    --background: 140 25% 97%;
-    --foreground: 170 10% 14%;
+    --background: 32 42% 96%;
+    --foreground: 215 26% 14%;
 
-    --muted: 144 22% 92%;
-    --muted-foreground: 160 12% 36%;
+    --surface: 32 36% 92%;
+
+    --muted: 30 30% 90%;
+    --muted-foreground: 215 18% 38%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 170 10% 14%;
+    --popover-foreground: 215 26% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 170 10% 14%;
+    --card-foreground: 215 26% 14%;
 
-    --border: 150 18% 88%;
-    --input: 150 18% 88%;
+    --border: 200 24% 84%;
+    --input: 200 24% 84%;
 
-    --primary: 144 79% 24%;
+    --primary: 187 65% 28%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 144 28% 88%;
-    --secondary-foreground: 170 12% 18%;
+    --secondary: 28 52% 92%;
+    --secondary-foreground: 215 30% 20%;
 
-    --accent: 28 88% 50%;
+    --accent: 25 86% 56%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 68% 48%;
     --destructive-foreground: 0 0% 100%;
 
-    --ring: 144 79% 30%;
+    --ring: 187 65% 34%;
 
-    --radius: 0.75rem;
+    --radius: 1rem;
+
+    --font-display: 'Manrope', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   }
 
   .dark {
-    --background: 170 18% 10%;
-    --foreground: 144 28% 92%;
+    --background: 215 26% 10%;
+    --foreground: 31 40% 94%;
 
-    --muted: 170 16% 18%;
-    --muted-foreground: 150 20% 65%;
+    --surface: 215 28% 14%;
 
-    --popover: 170 18% 12%;
-    --popover-foreground: 144 28% 92%;
+    --muted: 215 26% 18%;
+    --muted-foreground: 28 30% 78%;
 
-    --card: 170 18% 12%;
-    --card-foreground: 144 28% 92%;
+    --popover: 215 26% 12%;
+    --popover-foreground: 31 40% 94%;
 
-    --border: 170 12% 22%;
-    --input: 170 12% 22%;
+    --card: 215 26% 12%;
+    --card-foreground: 31 40% 94%;
 
-    --primary: 144 72% 38%;
+    --border: 210 18% 24%;
+    --input: 210 18% 24%;
+
+    --primary: 187 65% 42%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 170 12% 24%;
-    --secondary-foreground: 144 28% 92%;
+    --secondary: 28 52% 32%;
+    --secondary-foreground: 31 40% 94%;
 
-    --accent: 28 88% 52%;
+    --accent: 25 86% 58%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 62% 40%;
+    --destructive-foreground: 0 0% 98%;
 
-    --ring: 144 72% 44%;
+    --ring: 187 65% 50%;
   }
 
   * {
@@ -73,7 +80,14 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: 'Inter', sans-serif;
+    font-family: var(--font-body);
     background-color: hsl(var(--background));
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
   }
 }

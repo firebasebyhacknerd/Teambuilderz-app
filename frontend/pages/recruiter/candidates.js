@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { Users, Home, FileText, AlertTriangle, LogOut, Search, ChevronRight } from 'lucide-react';
+import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -68,6 +68,7 @@ const CandidatesPage = () => {
         { href: '/admin/candidates', label: 'Candidates', icon: Users },
         { href: '/recruiter/applications', label: 'Applications', icon: FileText },
         { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+        { href: '/profile', label: 'My Profile', icon: CircleUser },
       ];
     }
 
@@ -76,6 +77,7 @@ const CandidatesPage = () => {
       { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
       { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+      { href: '/profile', label: 'My Profile', icon: CircleUser },
     ];
   }, [userRole]);
 
@@ -189,3 +191,4 @@ const CandidatesPage = () => {
 };
 
 export default CandidatesPage;
+

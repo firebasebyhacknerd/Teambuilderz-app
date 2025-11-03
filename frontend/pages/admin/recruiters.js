@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
@@ -11,6 +11,7 @@ import {
   Save,
   Plus,
   TrendingUp,
+  CircleUser,
 } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
@@ -237,6 +238,7 @@ const AdminRecruitersPage = () => {
     { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    { href: '/profile', label: 'My Profile', icon: CircleUser },
   ];
 
   const isMutating = updateUser.isPending || deleteUser.isPending;

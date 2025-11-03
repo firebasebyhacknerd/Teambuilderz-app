@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   User,
@@ -10,6 +10,7 @@ import {
   Home,
   FileText,
   AlertTriangle,
+  CircleUser,
   MessageSquare,
   Lock,
   Bell,
@@ -24,6 +25,8 @@ import { Label } from '../../../components/ui/label';
 import Textarea from '../../../components/ui/textarea';
 import DashboardLayout from '../../../components/Layout/DashboardLayout';
 import API_URL from '../../../lib/api';
+import { track } from '../../../lib/analytics';
+import { formatDate as formatDateUtil, formatDateTime as formatDateTimeUtil, formatLabel as formatLabelUtil } from '../../../lib/formatting';
 import {
   queryKeys,
   useCandidatesQuery,
@@ -46,7 +49,8 @@ const sidebarLinks = [
   { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
   { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-  { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+  { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+  { href: '/profile', label: 'My Profile', icon: CircleUser }
 ];
 
 const stageBadges = {
@@ -101,6 +105,20 @@ const CandidateDetailPage = () => {
   const [assessmentScoreDrafts, setAssessmentScoreDrafts] = useState({});
   const [interviewTimelineMessage, setInterviewTimelineMessage] = useState(null);
   const [assessmentTimelineMessage, setAssessmentTimelineMessage] = useState(null);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const timelineToggleInitialized = useRef(false);
+  const noteFormRef = useRef(null);
+
+  useEffect(() => {
+    if (!timelineToggleInitialized.current) {
+      timelineToggleInitialized.current = true;
+      return;
+    }
+    track('candidate_timeline_toggle', {
+      candidateId: candidateId ?? null,
+      collapsed: timelineCollapsed,
+    });
+  }, [timelineCollapsed, candidateId]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -573,14 +591,14 @@ const createAssessment = useCreateAssessmentMutation(token, {
     }
   };
 
-  const toDateTimeLocal = (value) => {
+  const toDateTimeLocal = useCallback((value) => {
     if (!value) return '';
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
     const tzOffset = date.getTimezoneOffset();
     const localISO = new Date(date.getTime() - tzOffset * 60000).toISOString().slice(0, 16);
     return localISO;
-  };
+  }, []);
 
   const handleEditNote = (note) => {
     setEditingNoteId(note.id);
@@ -610,36 +628,91 @@ const createAssessment = useCreateAssessmentMutation(token, {
     deleteNote.mutate(noteId);
   };
 
-  const formatDateTime = (value) => {
-    if (!value) return 'Unknown time';
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }).format(new Date(value));
-    } catch (err) {
-      return String(value);
-    }
-  };
+  const formatDateTime = useCallback((value) => formatDateTimeUtil(value), []);
 
-  const formatDate = (value) => {
-    if (!value) return '--';
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'medium',
-      }).format(new Date(value));
-    } catch (err) {
-      return String(value);
-    }
-  };
+  const formatDate = useCallback((value) => formatDateUtil(value), []);
 
-  const formatLabel = (value) => {
-    if (!value) return '--';
-    return String(value)
-      .split('_')
-      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-      .join(' ');
-  };
+  const formatLabel = useCallback((value) => formatLabelUtil(value), []);
+
+  const timelineItems = useMemo(() => {
+    const items = [];
+
+    notes.forEach((note) => {
+      items.push({
+        id: `note-${note.id}`,
+        type: 'note',
+        timestamp: note.createdAt || note.created_at,
+        title: note.author?.name ? `Note · ${note.author.name}` : 'Note added',
+        description: note.content,
+        badge: note.reminder ? 'Reminder Set' : 'Note',
+        tone: note.reminder
+          ? 'border border-amber-200 bg-amber-100 text-amber-700'
+          : 'border border-sky-200 bg-sky-100 text-sky-700',
+      });
+    });
+
+    candidateInterviews.forEach((interview) => {
+      items.push({
+        id: `interview-${interview.id}`,
+        type: 'interview',
+        timestamp: interview.scheduled_date || interview.created_at,
+        title: `${formatLabel(interview.interview_type || 'interview')} interview`,
+        description: `${interview.company_name || 'Company not set'} · Round ${interview.round_number || 1}`,
+        badge: interview.status ? formatLabel(interview.status) : 'Interview',
+        tone: interview.is_approved
+          ? 'border border-emerald-200 bg-emerald-100 text-emerald-700'
+          : 'border border-purple-200 bg-purple-100 text-purple-700',
+      });
+    });
+
+    candidateAssessments.forEach((assessment) => {
+      items.push({
+        id: `assessment-${assessment.id}`,
+        type: 'assessment',
+        timestamp: assessment.assigned_date || assessment.created_at || assessment.due_date,
+        title: `${formatLabel(assessment.assessment_type || 'assessment')} assessment`,
+        description: assessment.assessment_platform || 'Platform not set',
+        badge: assessment.status ? formatLabel(assessment.status) : 'Assessment',
+        tone:
+          assessment.status === 'passed'
+            ? 'border border-emerald-200 bg-emerald-100 text-emerald-700'
+            : assessment.status === 'failed'
+              ? 'border border-rose-200 bg-rose-100 text-rose-700'
+              : 'border border-indigo-200 bg-indigo-100 text-indigo-700',
+        dueDate: assessment.due_date,
+      });
+    });
+
+    return items
+      .filter((item) => item.timestamp)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  }, [notes, candidateInterviews, candidateAssessments, formatLabel]);
+
+  const handleTimelineFollowUp = useCallback(
+    (item) => {
+      setTimelineCollapsed(false);
+      setNoteFollowUpEnabled(true);
+      const label = item.title || formatLabel(item.badge);
+      setNoteFollowUpTitle(`Follow-up: ${label}`);
+      setNoteFollowUpDescription(item.description || '');
+      setNoteFollowUpPriority(2);
+      setNoteFollowUpDueDate(item.dueDate ? toDateTimeLocal(item.dueDate) : '');
+      setNoteContent((prev) => prev || `Follow up on ${label}`);
+
+      track('candidate_timeline_followup_action', {
+        candidateId: candidateId ?? null,
+        itemType: item.type,
+        badge: item.badge,
+      });
+
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          noteFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    },
+    [candidateId, formatLabel, toDateTimeLocal],
+  );
 
   const stageLabel = useMemo(() => {
     if (!candidate?.current_stage) return 'N/A';
@@ -929,6 +1002,71 @@ const createAssessment = useCreateAssessmentMutation(token, {
             )}
           </div>
         </div>
+      </Card>
+
+      <Card className="mt-6 p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-foreground">Activity Timeline</h3>
+            <p className="text-sm text-muted-foreground">
+              Follow the story of this candidate across notes, interviews, and assessments.
+            </p>
+          </div>
+          {timelineItems.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={() => setTimelineCollapsed((prev) => !prev)}
+              title={timelineCollapsed ? 'Expand the consolidated timeline' : 'Collapse the consolidated timeline'}
+            >
+              {timelineCollapsed ? 'Expand' : 'Collapse'}
+            </Button>
+          )}
+        </div>
+        {timelineItems.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Tip: Use the quick actions on each entry to log a reminder without leaving the timeline.
+          </p>
+        )}
+        {timelineCollapsed && (
+          <p className="text-xs italic text-muted-foreground">
+            Timeline hidden. Expand to review the latest notes, interviews, and assessments in order.
+          </p>
+        )}
+        {timelineItems.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+            No activity yet. As you add notes, interviews, or assessments, they will appear here in chronological order.
+          </div>
+        ) : timelineCollapsed ? null : (
+          <ol className="relative space-y-4 border-l border-border/60 pl-6">
+            {timelineItems.map((item) => {
+              const IconComponent =
+                item.type === 'note' ? MessageSquare : item.type === 'interview' ? Briefcase : Target;
+              return (
+                <li key={item.id} className="relative pl-4">
+                  <span className="absolute -left-[14px] top-2 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background">
+                    <IconComponent className="h-3.5 w-3.5 text-primary" />
+                  </span>
+                  <div className="space-y-2 rounded-lg border border-border bg-card/60 p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.description}</p>
+                      </div>
+                      <Badge className={item.tone}>{item.badge}</Badge>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{formatDateTime(item.timestamp)}</span>
+                      {item.dueDate && <span>� Due {formatDate(item.dueDate)}</span>}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </Card>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
@@ -1456,6 +1594,8 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
   </div>
 );
 export default CandidateDetailPage;
+
+
 
 
 

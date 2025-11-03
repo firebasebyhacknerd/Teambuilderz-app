@@ -9,7 +9,8 @@ import {
   Calendar,
   Home,
   Users,
-  FileText
+  FileText,
+  CircleUser
 } from 'lucide-react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -74,14 +75,17 @@ const AlertsPage = () => {
       return [
         { href: '/recruiter', label: 'Dashboard', icon: Home },
         { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-        { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+        { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+        { href: '/profile', label: 'My Profile', icon: CircleUser },
       ];
     }
+
     return [
       { href: '/admin', label: 'Dashboard', icon: Home },
       { href: '/admin/candidates', label: 'Candidates', icon: Users },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-      { href: '/alerts', label: 'Alerts', icon: AlertTriangle }
+      { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+      { href: '/profile', label: 'My Profile', icon: CircleUser },
     ];
   }, [userRole]);
 
@@ -302,3 +306,4 @@ const SummaryCard = ({ icon, title, value, color }) => (
 );
 
 export default AlertsPage;
+

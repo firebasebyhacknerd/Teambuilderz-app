@@ -15,14 +15,127 @@ if (!SECRET_KEY) {
   process.exit(1);
 }
 
-// Security configuration
-const authLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
+function createLimiter({ windowMs, max, message, name }) {
+  const limiterName = name || 'rate-limit';
+  const responseMessage = message || { message: 'Too many requests. Please try again later.' };
+
+  return rateLimit({
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    statusCode: 429,
+    message: responseMessage,
+    handler: (req, res, next, options) => {
+      console.warn(
+        `[RateLimit] ${limiterName} threshold hit`,
+        JSON.stringify({
+          ip: req.ip,
+          path: req.originalUrl,
+          max,
+          windowMs,
+        }),
+      );
+      res.status(options.statusCode).json(responseMessage);
+    },
+  });
+}
+
+function composeMiddleware(middlewares) {
+  return (req, res, next) => {
+    let idx = 0;
+    const run = (err) => {
+      if (err) return next(err);
+      const middleware = middlewares[idx++];
+      if (!middleware) return next();
+      try {
+        middleware(req, res, run);
+      } catch (error) {
+        next(error);
+      }
+    };
+    run();
+  };
+}
+
+function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
+  return async (req, res) => {
+    const { email, password } = req.body;
+    const requestIp = req.ip;
+
+    try {
+      console.info(
+        '[Auth] Login attempt received',
+        JSON.stringify({
+          email,
+          ip: requestIp,
+          userAgent: req.headers['user-agent'],
+        }),
+      );
+
+      const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+
+      if (result.rows.length === 0) {
+        console.warn(
+          '[Auth] Login failed - unknown email',
+          JSON.stringify({
+            email,
+            ip: requestIp,
+          }),
+        );
+        return res.status(401).json({ message: 'Invalid email or password.' });
+      }
+
+      const user = result.rows[0];
+      const passwordMatch = await bcryptLib.compare(password, user.password_hash);
+
+      if (!passwordMatch) {
+        console.warn(
+          '[Auth] Login failed - invalid credentials',
+          JSON.stringify({
+            email,
+            ip: requestIp,
+            userId: user.id,
+          }),
+        );
+        return res.status(401).json({ message: 'Invalid email or password.' });
+      }
+
+      const token = jwtLib.sign({ userId: user.id, role: user.role }, secret, { expiresIn: '1d' });
+
+      await db.query(
+        `
+        UPDATE users
+        SET last_login_at = CURRENT_TIMESTAMP,
+            last_active_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+      `,
+        [user.id],
+      );
+
+      console.info(
+        '[Auth] Login success',
+        JSON.stringify({
+          email,
+          ip: requestIp,
+          userId: user.id,
+          role: user.role,
+        }),
+      );
+
+      res.json({ token, role: user.role, name: user.name, id: user.id });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ message: 'Internal server error during login.' });
+    }
+  };
+}
+
+const authLimiter = createLimiter({
+  windowMs: 5 * 60 * 1000,
   max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skipSuccessfulRequests: true,
-  statusCode: 429,
+  name: 'auth-login',
   message: { message: 'Too many login attempts. Please try again after 5 minutes.' },
 });
 
@@ -36,8 +149,7 @@ const pool = new Pool({
 });
 
 // Middleware
-app.use(cors());
-app.use(bodyParser.json());
+app.use(composeMiddleware([cors(), bodyParser.json()]));
 
 // Routes
 app.get('/', (req, res) => {
@@ -45,6 +157,353 @@ app.get('/', (req, res) => {
 });
 
 // Database Schema Setup
+async function ensureEnums(db) {
+  await db.query(`
+    CREATE TYPE user_role AS ENUM ('Admin', 'Recruiter', 'Viewer');
+    CREATE TYPE candidate_stage AS ENUM ('onboarding', 'marketing', 'interviewing', 'offered', 'placed', 'inactive');
+    CREATE TYPE application_status AS ENUM ('sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected');
+    CREATE TYPE interview_status AS ENUM ('scheduled', 'completed', 'feedback_pending', 'rejected', 'advanced');
+    CREATE TYPE assessment_status AS ENUM ('assigned', 'submitted', 'passed', 'failed', 'waived');
+    CREATE TYPE reminder_status AS ENUM ('pending', 'sent', 'snoozed', 'dismissed');
+    CREATE TYPE alert_status AS ENUM ('open', 'acknowledged', 'resolved');
+    CREATE TYPE interview_type AS ENUM ('phone', 'video', 'in_person', 'technical', 'hr', 'final');
+  `);
+}
+
+async function ensureTables(db) {
+  const statements = [
+    `
+      CREATE TABLE users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password_hash VARCHAR(100) NOT NULL,
+        role user_role NOT NULL,
+        daily_quota INTEGER DEFAULT 60,
+        is_active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE candidates (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        phone VARCHAR(20),
+        visa_status VARCHAR(50),
+        skills TEXT[],
+        experience_years INTEGER,
+        current_stage candidate_stage DEFAULT 'onboarding',
+        marketing_start_date DATE,
+        assigned_recruiter_id INTEGER REFERENCES users(id),
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE documents (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        filename VARCHAR(255) NOT NULL,
+        file_path VARCHAR(500) NOT NULL,
+        file_type VARCHAR(50),
+        file_size INTEGER,
+        uploaded_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE applications (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        recruiter_id INTEGER REFERENCES users(id),
+        company_name VARCHAR(100) NOT NULL,
+        job_title VARCHAR(100) NOT NULL,
+        job_description TEXT,
+        channel VARCHAR(50),
+        status application_status DEFAULT 'sent',
+        application_date DATE DEFAULT CURRENT_DATE,
+        applications_count INTEGER DEFAULT 1,
+        is_approved BOOLEAN DEFAULT false,
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TIMESTAMP WITHOUT TIME ZONE,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE interviews (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        application_id INTEGER REFERENCES applications(id),
+        recruiter_id INTEGER REFERENCES users(id),
+        company_name VARCHAR(100) NOT NULL,
+        interview_type interview_type NOT NULL,
+        round_number INTEGER DEFAULT 1,
+        scheduled_date TIMESTAMP WITH TIME ZONE NOT NULL,
+        timezone VARCHAR(50) DEFAULT 'UTC',
+        status interview_status DEFAULT 'scheduled',
+        feedback TEXT,
+        feedback_files TEXT[],
+        is_approved BOOLEAN DEFAULT false,
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TIMESTAMP WITHOUT TIME ZONE,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE assessments (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        application_id INTEGER REFERENCES applications(id),
+        recruiter_id INTEGER REFERENCES users(id),
+        assessment_platform VARCHAR(50) NOT NULL,
+        assessment_type VARCHAR(50),
+        assigned_date DATE DEFAULT CURRENT_DATE,
+        due_date DATE NOT NULL,
+        status assessment_status DEFAULT 'assigned',
+        score DECIMAL(5,2),
+        notes TEXT,
+        is_approved BOOLEAN DEFAULT false,
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TIMESTAMP WITHOUT TIME ZONE,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE notes (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        application_id INTEGER REFERENCES applications(id),
+        interview_id INTEGER REFERENCES interviews(id),
+        assessment_id INTEGER REFERENCES assessments(id),
+        author_id INTEGER REFERENCES users(id),
+        content TEXT NOT NULL,
+        is_private BOOLEAN DEFAULT false,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE reminders (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL,
+        title VARCHAR(200) NOT NULL,
+        description TEXT,
+        due_date TIMESTAMP WITH TIME ZONE NOT NULL,
+        status reminder_status DEFAULT 'pending',
+        priority INTEGER DEFAULT 1,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE alerts (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        alert_type VARCHAR(50) NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        status alert_status DEFAULT 'open',
+        priority INTEGER DEFAULT 1,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        acknowledged_at TIMESTAMP WITH TIME ZONE,
+        resolved_at TIMESTAMP WITH TIME ZONE
+      );
+    `,
+    `
+      CREATE TABLE daily_activity (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        activity_date DATE DEFAULT CURRENT_DATE,
+        applications_count INTEGER DEFAULT 0,
+        interviews_count INTEGER DEFAULT 0,
+        assessments_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, activity_date)
+      );
+    `,
+    `
+      CREATE TABLE audit_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        action VARCHAR(50) NOT NULL,
+        table_name VARCHAR(50) NOT NULL,
+        record_id INTEGER,
+        old_values JSONB,
+        new_values JSONB,
+        ip_address INET,
+        user_agent TEXT,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE export_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        export_type VARCHAR(50) NOT NULL,
+        filters JSONB,
+        row_count INTEGER,
+        file_path VARCHAR(500),
+        status VARCHAR(20) DEFAULT 'pending',
+        admin_approval_required BOOLEAN DEFAULT false,
+        approved_by INTEGER REFERENCES users(id),
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+    `
+      CREATE TABLE IF NOT EXISTS candidate_assignments (
+        id SERIAL PRIMARY KEY,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        recruiter_id INTEGER REFERENCES users(id),
+        assigned_by INTEGER REFERENCES users(id),
+        assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        unassigned_at TIMESTAMP WITHOUT TIME ZONE,
+        note TEXT
+      );
+    `,
+  ];
+
+  for (const statement of statements) {
+    await db.query(statement);
+  }
+}
+
+async function ensureIndexes(db) {
+  const statements = [
+    `CREATE INDEX IF NOT EXISTS idx_candidates_recruiter ON candidates(assigned_recruiter_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_candidates_stage ON candidates(current_stage);`,
+    `CREATE INDEX IF NOT EXISTS idx_applications_candidate ON applications(candidate_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_applications_recruiter ON applications(recruiter_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);`,
+    `CREATE INDEX IF NOT EXISTS idx_interviews_candidate ON interviews(candidate_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_interviews_date ON interviews(scheduled_date);`,
+    `CREATE INDEX IF NOT EXISTS idx_assessments_due ON assessments(due_date);`,
+    `CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(due_date);`,
+    `CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts(user_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_logs_table ON audit_logs(table_name);`,
+  ];
+
+  for (const statement of statements) {
+    await db.query(statement);
+  }
+}
+
+async function seedDefaultUsers(db, bcryptLib) {
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const recruiterPassword = process.env.RECRUITER_PASSWORD || 'recruit123';
+  const [hashedAdminPassword, hashedRecruiterPassword] = await Promise.all([
+    bcryptLib.hash(adminPassword, 10),
+    bcryptLib.hash(recruiterPassword, 10),
+  ]);
+
+  await db.query(
+    `
+      INSERT INTO users (name, email, password_hash, role, daily_quota)
+      VALUES ('Kunal Gupta', 'admin@tbz.us', $1, 'Admin', 0),
+             ('Sarthi Patel', 'sarthi@tbz.us', $2, 'Recruiter', 60);
+    `,
+    [hashedAdminPassword, hashedRecruiterPassword],
+  );
+}
+
+async function ensureApplicationColumns(db) {
+  await db.query(`
+    ALTER TABLE applications
+    ADD COLUMN IF NOT EXISTS applications_count INTEGER DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
+  `);
+
+  await db.query(`
+    UPDATE applications
+    SET applications_count = COALESCE(applications_count, 1),
+        is_approved = COALESCE(is_approved, false)
+  `);
+}
+
+async function ensureInterviewColumns(db) {
+  await db.query(`
+    ALTER TABLE interviews
+    ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
+  `);
+
+  await db.query(`
+    UPDATE interviews
+    SET is_approved = COALESCE(is_approved, false)
+  `);
+}
+
+async function ensureAssessmentColumns(db) {
+  await db.query(`
+    ALTER TABLE assessments
+    ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
+    ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
+  `);
+
+  await db.query(`
+    UPDATE assessments
+    SET is_approved = COALESCE(is_approved, false)
+  `);
+}
+
+async function ensureReminderNoteLink(db) {
+  await db.query(`
+    ALTER TABLE reminders
+    ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL
+  `);
+}
+
+async function ensureUserActivityColumns(db) {
+  await db.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE
+  `);
+
+  await db.query(`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITHOUT TIME ZONE
+  `);
+}
+
+async function ensureCandidateAssignments(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS candidate_assignments (
+      id SERIAL PRIMARY KEY,
+      candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+      recruiter_id INTEGER REFERENCES users(id),
+      assigned_by INTEGER REFERENCES users(id),
+      assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      unassigned_at TIMESTAMP WITHOUT TIME ZONE,
+      note TEXT
+    )
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_candidate_assignments_candidate ON candidate_assignments(candidate_id)
+  `);
+}
+
+async function ensureSchemaEvolution(db) {
+  await Promise.all([
+    ensureApplicationColumns(db),
+    ensureInterviewColumns(db),
+    ensureAssessmentColumns(db),
+    ensureReminderNoteLink(db),
+    ensureUserActivityColumns(db),
+  ]);
+
+  await ensureCandidateAssignments(db);
+}
+
 async function setupDatabase() {
   try {
     const res = await pool.query(`
@@ -57,350 +516,17 @@ async function setupDatabase() {
 
     if (!res.rows[0].exists) {
       console.log('Database tables not found. Initializing comprehensive schema...');
-
-      // Create ENUMs first
-      await pool.query(`
-        CREATE TYPE user_role AS ENUM ('Admin', 'Recruiter', 'Viewer');
-        CREATE TYPE candidate_stage AS ENUM ('onboarding', 'marketing', 'interviewing', 'offered', 'placed', 'inactive');
-        CREATE TYPE application_status AS ENUM ('sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected');
-        CREATE TYPE interview_status AS ENUM ('scheduled', 'completed', 'feedback_pending', 'rejected', 'advanced');
-        CREATE TYPE assessment_status AS ENUM ('assigned', 'submitted', 'passed', 'failed', 'waived');
-        CREATE TYPE reminder_status AS ENUM ('pending', 'sent', 'snoozed', 'dismissed');
-        CREATE TYPE alert_status AS ENUM ('open', 'acknowledged', 'resolved');
-        CREATE TYPE interview_type AS ENUM ('phone', 'video', 'in_person', 'technical', 'hr', 'final');
-      `);
-
-      // Users table with enhanced fields
-      await pool.query(`
-        CREATE TABLE users (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
-          email VARCHAR(100) UNIQUE NOT NULL,
-          password_hash VARCHAR(100) NOT NULL,
-          role user_role NOT NULL,
-          daily_quota INTEGER DEFAULT 60,
-          is_active BOOLEAN DEFAULT true,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Candidates table
-      await pool.query(`
-        CREATE TABLE candidates (
-          id SERIAL PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
-          email VARCHAR(100) UNIQUE NOT NULL,
-          phone VARCHAR(20),
-          visa_status VARCHAR(50),
-          skills TEXT[],
-          experience_years INTEGER,
-          current_stage candidate_stage DEFAULT 'onboarding',
-          marketing_start_date DATE,
-          assigned_recruiter_id INTEGER REFERENCES users(id),
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Documents table for resumes and other files
-      await pool.query(`
-        CREATE TABLE documents (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          filename VARCHAR(255) NOT NULL,
-          file_path VARCHAR(500) NOT NULL,
-          file_type VARCHAR(50),
-          file_size INTEGER,
-          uploaded_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Applications table
-      await pool.query(`
-        CREATE TABLE applications (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          recruiter_id INTEGER REFERENCES users(id),
-          company_name VARCHAR(100) NOT NULL,
-          job_title VARCHAR(100) NOT NULL,
-          job_description TEXT,
-          channel VARCHAR(50),
-          status application_status DEFAULT 'sent',
-          application_date DATE DEFAULT CURRENT_DATE,
-          applications_count INTEGER DEFAULT 1,
-          is_approved BOOLEAN DEFAULT false,
-          approved_by INTEGER REFERENCES users(id),
-          approved_at TIMESTAMP WITHOUT TIME ZONE,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Interviews table
-      await pool.query(`
-        CREATE TABLE interviews (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          application_id INTEGER REFERENCES applications(id),
-          recruiter_id INTEGER REFERENCES users(id),
-          company_name VARCHAR(100) NOT NULL,
-          interview_type interview_type NOT NULL,
-          round_number INTEGER DEFAULT 1,
-          scheduled_date TIMESTAMP WITH TIME ZONE NOT NULL,
-          timezone VARCHAR(50) DEFAULT 'UTC',
-          status interview_status DEFAULT 'scheduled',
-          feedback TEXT,
-          feedback_files TEXT[],
-          is_approved BOOLEAN DEFAULT false,
-          approved_by INTEGER REFERENCES users(id),
-          approved_at TIMESTAMP WITHOUT TIME ZONE,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Assessments table
-      await pool.query(`
-        CREATE TABLE assessments (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          application_id INTEGER REFERENCES applications(id),
-          recruiter_id INTEGER REFERENCES users(id),
-          assessment_platform VARCHAR(50) NOT NULL,
-          assessment_type VARCHAR(50),
-          assigned_date DATE DEFAULT CURRENT_DATE,
-          due_date DATE NOT NULL,
-          status assessment_status DEFAULT 'assigned',
-          score DECIMAL(5,2),
-          notes TEXT,
-          is_approved BOOLEAN DEFAULT false,
-          approved_by INTEGER REFERENCES users(id),
-          approved_at TIMESTAMP WITHOUT TIME ZONE,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Notes table
-      await pool.query(`
-        CREATE TABLE notes (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          application_id INTEGER REFERENCES applications(id),
-          interview_id INTEGER REFERENCES interviews(id),
-          assessment_id INTEGER REFERENCES assessments(id),
-          author_id INTEGER REFERENCES users(id),
-          content TEXT NOT NULL,
-          is_private BOOLEAN DEFAULT false,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Reminders table
-      await pool.query(`
-        CREATE TABLE reminders (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL,
-          title VARCHAR(200) NOT NULL,
-          description TEXT,
-          due_date TIMESTAMP WITH TIME ZONE NOT NULL,
-          status reminder_status DEFAULT 'pending',
-          priority INTEGER DEFAULT 1,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      await pool.query(`
-        ALTER TABLE reminders
-        ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL
-      `);
-
-      // Alerts table
-      await pool.query(`
-        CREATE TABLE alerts (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          alert_type VARCHAR(50) NOT NULL,
-          title VARCHAR(200) NOT NULL,
-          message TEXT NOT NULL,
-          status alert_status DEFAULT 'open',
-          priority INTEGER DEFAULT 1,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          acknowledged_at TIMESTAMP WITH TIME ZONE,
-          resolved_at TIMESTAMP WITH TIME ZONE
-        );
-      `);
-
-      // Daily activity tracking
-      await pool.query(`
-        CREATE TABLE daily_activity (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-          activity_date DATE DEFAULT CURRENT_DATE,
-          applications_count INTEGER DEFAULT 0,
-          interviews_count INTEGER DEFAULT 0,
-          assessments_count INTEGER DEFAULT 0,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE(user_id, activity_date)
-        );
-      `);
-
-      // Audit logs
-      await pool.query(`
-        CREATE TABLE audit_logs (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id),
-          action VARCHAR(50) NOT NULL,
-          table_name VARCHAR(50) NOT NULL,
-          record_id INTEGER,
-          old_values JSONB,
-          new_values JSONB,
-          ip_address INET,
-          user_agent TEXT,
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Export logs
-      await pool.query(`
-        CREATE TABLE export_logs (
-          id SERIAL PRIMARY KEY,
-          user_id INTEGER REFERENCES users(id),
-          export_type VARCHAR(50) NOT NULL,
-          filters JSONB,
-          row_count INTEGER,
-          file_path VARCHAR(500),
-          status VARCHAR(20) DEFAULT 'pending',
-          admin_approval_required BOOLEAN DEFAULT false,
-          approved_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
-        );
-      `);
-
-      // Create indexes for performance
-      await pool.query(`
-        CREATE INDEX idx_candidates_recruiter ON candidates(assigned_recruiter_id);
-        CREATE INDEX idx_candidates_stage ON candidates(current_stage);
-        CREATE INDEX idx_applications_candidate ON applications(candidate_id);
-        CREATE INDEX idx_applications_recruiter ON applications(recruiter_id);
-        CREATE INDEX idx_applications_status ON applications(status);
-        CREATE INDEX idx_interviews_candidate ON interviews(candidate_id);
-        CREATE INDEX idx_interviews_date ON interviews(scheduled_date);
-        CREATE INDEX idx_assessments_due ON assessments(due_date);
-        CREATE INDEX idx_reminders_due ON reminders(due_date);
-        CREATE INDEX idx_alerts_user ON alerts(user_id);
-        CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
-        CREATE INDEX idx_audit_logs_table ON audit_logs(table_name);
-      `);
-
-      // Candidate assignment history
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS candidate_assignments (
-          id SERIAL PRIMARY KEY,
-          candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-          recruiter_id INTEGER REFERENCES users(id),
-          assigned_by INTEGER REFERENCES users(id),
-          assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-          unassigned_at TIMESTAMP WITHOUT TIME ZONE,
-          note TEXT
-        );
-      `);
-
-      await pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_candidate_assignments_candidate ON candidate_assignments(candidate_id);
-      `);
-
-      // Insert default users
-      const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-      const recruiterPassword = process.env.RECRUITER_PASSWORD || 'recruit123';
-      const hashedAdminPassword = await bcrypt.hash(adminPassword, 10);
-      const hashedRecruiterPassword = await bcrypt.hash(recruiterPassword, 10);
-
-      await pool.query(`
-        INSERT INTO users (name, email, password_hash, role, daily_quota)
-        VALUES ('Kunal Gupta', 'admin@tbz.us', $1, 'Admin', 0),
-               ('Sarthi Patel', 'sarthi@tbz.us', $2, 'Recruiter', 60);
-      `, [hashedAdminPassword, hashedRecruiterPassword]);
-
+      await ensureEnums(pool);
+      await ensureTables(pool);
+      await ensureIndexes(pool);
+      await seedDefaultUsers(pool, bcrypt);
       console.log('Comprehensive database schema created successfully!');
       console.log('Default Admin and Recruiter users created.');
     } else {
       console.log('Database tables detected. Ensuring schema completeness...');
     }
 
-    // Ensure new columns exist for evolved schema
-    await pool.query(`
-      ALTER TABLE applications
-      ADD COLUMN IF NOT EXISTS applications_count INTEGER DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
-      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
-    `);
-
-    await pool.query(`
-      UPDATE applications
-      SET applications_count = COALESCE(applications_count, 1),
-          is_approved = COALESCE(is_approved, false)
-    `);
-
-    await pool.query(`
-      ALTER TABLE interviews
-      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
-      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
-    `);
-
-    await pool.query(`
-      UPDATE interviews
-      SET is_approved = COALESCE(is_approved, false)
-    `);
-
-    await pool.query(`
-      ALTER TABLE assessments
-      ADD COLUMN IF NOT EXISTS is_approved BOOLEAN DEFAULT false,
-      ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id),
-      ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE
-    `);
-
-    await pool.query(`
-      UPDATE assessments
-      SET is_approved = COALESCE(is_approved, false)
-    `);
-
-    await pool.query(`
-      ALTER TABLE reminders
-      ADD COLUMN IF NOT EXISTS note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL
-    `);
-
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE
-    `);
-
-    await pool.query(`
-      ALTER TABLE users
-      ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP WITHOUT TIME ZONE
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS candidate_assignments (
-        id SERIAL PRIMARY KEY,
-        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
-        recruiter_id INTEGER REFERENCES users(id),
-        assigned_by INTEGER REFERENCES users(id),
-        assigned_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        unassigned_at TIMESTAMP WITHOUT TIME ZONE,
-        note TEXT
-      )
-    `);
-
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_candidate_assignments_candidate ON candidate_assignments(candidate_id)
-    `);
+    await ensureSchemaEvolution(pool);
   } catch (error) {
     console.error('Database setup error:', error.message);
   }
@@ -471,42 +597,25 @@ const fetchCandidateWithAccess = async (candidateId, user) => {
   return candidate;
 };
 
+const loginHandler = createLoginHandler({
+  db: pool,
+  jwtLib: jwt,
+  bcryptLib: bcrypt,
+  secret: SECRET_KEY,
+});
+
 // Authentication Route
-app.post('/api/v1/auth/login', authLimiter, async (req, res) => {
-  const { email, password } = req.body;
+app.post('/api/v1/auth/login', authLimiter, loginHandler);
 
-  try {
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+app.post('/api/v1/analytics', (req, res) => {
+  const events = Array.isArray(req.body?.events) ? req.body.events : [];
+  const meta = {
+    count: events.length,
+    sample: events.slice(0, 3).map((event) => event.event),
+  };
 
-    if (result.rows.length === 0) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
-    }
-
-    const user = result.rows[0];
-    const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!passwordMatch) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
-    }
-
-    const token = jwt.sign({ userId: user.id, role: user.role }, SECRET_KEY, { expiresIn: '1d' });
-
-    await pool.query(
-      `
-        UPDATE users
-        SET last_login_at = CURRENT_TIMESTAMP,
-            last_active_at = CURRENT_TIMESTAMP
-        WHERE id = $1
-      `,
-      [user.id]
-    );
-
-    res.json({ token, role: user.role, name: user.name, id: user.id });
-
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'Internal server error during login.' });
-  }
+  console.info('[Analytics] Batch received', JSON.stringify(meta));
+  res.status(204).end();
 });
 
 app.get('/api/v1/profile', verifyToken, async (req, res) => {

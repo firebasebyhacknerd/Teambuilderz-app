@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { ArrowLeft, Menu, X } from 'lucide-react';
 import { Button } from '../ui/button';
+import ActivityPulse from '../analytics/ActivityPulse';
 
 /**
  * DashboardLayout renders a sticky sidebar with quick navigation and
@@ -84,8 +85,8 @@ const DashboardLayout = ({
       )}
 
       {/* Main */}
-      <div className="flex-1 lg:ml-72 bg-gradient-to-br from-white via-[hsl(var(--background))] to-white">
-        <header className="sticky top-0 z-10 bg-background/85 backdrop-blur border-b border-border">
+      <div className="flex-1 lg:ml-72 bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--surface))] to-[hsl(var(--background))]">
+        <header className="sticky top-0 z-10 bg-background/80 backdrop-blur border-b border-border">
           <div className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <Button
@@ -107,7 +108,10 @@ const DashboardLayout = ({
                 {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
               </div>
             </div>
-            {actions && <div className="flex items-center gap-3">{actions}</div>}
+            <div className="flex items-center gap-3">
+              <ActivityPulse />
+              {actions}
+            </div>
           </div>
         </header>
 

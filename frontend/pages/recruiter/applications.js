@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp, Edit, Check, X } from 'lucide-react';
+import { FileText, Filter, Home, LogOut, Users, AlertTriangle, TrendingUp, CircleUser, Edit, Check, X } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import { track } from '../../lib/analytics';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -17,8 +18,18 @@ import {
   useApproveApplicationMutation,
   useDeleteApplicationMutation,
 } from '../../lib/queryHooks';
+import { formatDate, formatDateTime, formatLabel } from '../../lib/formatting';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
+const STATUS_DETAILS = {
+  sent: { label: 'Sent', tone: 'border border-slate-200 bg-slate-100 text-slate-700', bar: 'bg-slate-400' },
+  viewed: { label: 'Viewed', tone: 'border border-sky-200 bg-sky-100 text-sky-700', bar: 'bg-sky-400' },
+  shortlisted: { label: 'Shortlisted', tone: 'border border-indigo-200 bg-indigo-100 text-indigo-700', bar: 'bg-indigo-400' },
+  interviewing: { label: 'Interviewing', tone: 'border border-purple-200 bg-purple-100 text-purple-700', bar: 'bg-purple-400' },
+  offered: { label: 'Offered', tone: 'border border-amber-200 bg-amber-100 text-amber-700', bar: 'bg-amber-400' },
+  hired: { label: 'Hired', tone: 'border border-emerald-200 bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
+  rejected: { label: 'Rejected', tone: 'border border-rose-200 bg-rose-100 text-rose-700', bar: 'bg-rose-400' },
+};
 
 const ApplicationsPage = () => {
   const router = useRouter();
@@ -198,6 +209,25 @@ const ApplicationsPage = () => {
       { total: 0, approved: 0, pending: 0, approvedRecords: 0, pendingRecords: 0 }
     );
   }, [filteredApplications]);
+
+  const statusSummary = useMemo(() => {
+    const base = STATUS_OPTIONS.reduce((acc, status) => {
+      acc[status] = 0;
+      return acc;
+    }, {});
+
+    applications.forEach((app) => {
+      const statusKey = STATUS_OPTIONS.includes(app.status) ? app.status : 'sent';
+      base[statusKey] = (base[statusKey] || 0) + 1;
+    });
+
+    return base;
+  }, [applications]);
+
+  const statusSummaryTotal = useMemo(
+    () => STATUS_OPTIONS.reduce((total, status) => total + (statusSummary[status] ?? 0), 0),
+    [statusSummary],
+  );
   const needsReductionReason = Number(formValues.applicationsCount || 0) < 60;
 
   useEffect(() => {
@@ -214,6 +244,7 @@ const ApplicationsPage = () => {
         { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
         { href: '/recruiter/applications', label: 'Applications', icon: FileText },
         { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+        { href: '/profile', label: 'My Profile', icon: CircleUser },
       ];
     }
 
@@ -222,6 +253,7 @@ const ApplicationsPage = () => {
       { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
       { href: '/recruiter/applications', label: 'Applications', icon: FileText },
       { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+      { href: '/profile', label: 'My Profile', icon: CircleUser },
     ];
   }, [userRole]);
 
@@ -257,32 +289,6 @@ const ApplicationsPage = () => {
       candidate.company_name ||
       (candidate.name ? `${candidate.name} Interview` : '')
     );
-  };
-
-  const formatDateTime = (value) => {
-    if (!value) return '--';
-    try {
-      return new Date(value).toLocaleString(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      });
-    } catch {
-      return value;
-    }
-  };
-
-  const formatDate = (value) => {
-    if (!value) return '--';
-    try {
-      return new Date(value).toLocaleDateString(undefined, { dateStyle: 'medium' });
-    } catch {
-      return value;
-    }
-  };
-
-  const formatLabel = (value) => {
-    if (!value) return '--';
-    return value.charAt(0).toUpperCase() + value.slice(1);
   };
 
   const handleFormChange = (field) => (event) => {
@@ -838,6 +844,76 @@ const ApplicationsPage = () => {
             <SummaryCard label="Pending Total (Filtered)" value={filteredApprovalSummary.pending} />
             <SummaryCard label="Pending Records" value={filteredApprovalSummary.pendingRecords} />
           </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Status Overview
+            </p>
+            {applicationsLoading ? (
+              <div className="text-xs text-muted-foreground">Loading status insights...</div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {STATUS_OPTIONS.map((status) => {
+                  const details = STATUS_DETAILS[status] ?? {
+                    label: formatLabel(status),
+                    tone: 'border border-border bg-muted text-foreground',
+                  };
+                  const isActive = statusFilter === status;
+                  const count = statusSummary[status] ?? 0;
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => {
+                        const nextStatus = isActive ? '' : status;
+                        setStatusFilter(nextStatus);
+                        track('recruiter_status_chip_clicked', {
+                          status,
+                          active: nextStatus === status,
+                          total: statusSummary[status] ?? 0,
+                        });
+                      }}
+                      title={`Filter by ${details.label}`}
+                      aria-pressed={isActive}
+                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 ${details.tone} ${
+                        isActive ? 'ring-2 ring-offset-1 ring-primary/60' : 'hover:border-primary/40'
+                      }`}
+                    >
+                      <span>{details.label}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Click a stage to filter the table. Counts reflect the records currently loaded for this recruiter.
+            </p>
+            {!applicationsLoading && statusSummaryTotal > 0 && (
+              <div className="w-full space-y-1">
+                <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+                  {STATUS_OPTIONS.map((status) => {
+                    const count = statusSummary[status] ?? 0;
+                    if (!count) {
+                      return null;
+                    }
+                    const width = (count / statusSummaryTotal) * 100;
+                    const barClass = STATUS_DETAILS[status]?.bar ?? 'bg-primary';
+                    return (
+                      <div
+                        key={`heat-${status}`}
+                        className={`${barClass} transition-all`}
+                        style={{ width: `${width}%`, minWidth: '4px' }}
+                        title={`${STATUS_DETAILS[status]?.label ?? formatLabel(status)}: ${count}`}
+                      />
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Pipeline distribution across {statusSummaryTotal} records
+                </p>
+              </div>
+            )}
+          </div>
         </Card>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -1211,6 +1287,9 @@ const SummaryCard = ({ label, value }) => (
 );
 
 export default ApplicationsPage;
+
+
+
 
 
 

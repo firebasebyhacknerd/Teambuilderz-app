@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
@@ -21,6 +21,7 @@ import {
   X,
   CheckCircle,
   XCircle,
+  CircleUser,
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -32,6 +33,7 @@ import {
   useUserActivityQuery,
 } from '../../lib/queryHooks';
 import API_URL from '../../lib/api';
+import { formatLabel } from '../../lib/formatting';
 
 const numberFormatter = new Intl.NumberFormat();
 const percentFormatter = new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 0 });
@@ -41,13 +43,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
 });
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 const humanizeLabel = (value) => {
-  if (typeof value !== 'string' || value.length === 0) {
-    return value ?? 'N/A';
+  if (value === null || value === undefined) {
+    return 'N/A';
   }
-  return value
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
+  const formatted = formatLabel(value, 'N/A');
+  return formatted || 'N/A';
 };
 
 const AdminDashboard = () => {
@@ -165,6 +165,8 @@ const applicationsTodayDetails = (
   const recruiterProductivity = overview?.recruiterProductivity ?? [];
 
   const [pendingRecruiterId, setPendingRecruiterId] = useState('all');
+  const pendingApprovalsRef = useRef(null);
+  const [pendingFocusType, setPendingFocusType] = useState(null);
 
   const recentNotes = activity?.recentNotes ?? [];
   const upcomingReminders = activity?.upcomingReminders ?? [];
@@ -259,6 +261,20 @@ const applicationsTodayDetails = (
     }),
     [filteredPendingApprovals],
   );
+  const focusPendingApprovals = useCallback((type) => {
+    setPendingFocusType(type);
+    requestAnimationFrame(() => {
+      if (pendingApprovalsRef.current) {
+        pendingApprovalsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!pendingFocusType || typeof window === 'undefined') return;
+    const handle = window.setTimeout(() => setPendingFocusType(null), 2500);
+    return () => window.clearTimeout(handle);
+  }, [pendingFocusType]);
 
   const notesByRecruiter = activity?.notesByRecruiter ?? [];
   const centerReminders = notifications?.reminders ?? [];
@@ -401,6 +417,7 @@ const applicationsTodayDetails = (
     { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    { href: '/profile', label: 'My Profile', icon: CircleUser },
   ];
 
   if (isLoading) {
@@ -446,45 +463,89 @@ const applicationsTodayDetails = (
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
-        <KpiCard icon={<Users className="h-5 w-5 text-primary" />} title="Total Candidates" value={summary.totalCandidates} accent="bg-primary/10 text-primary" />
-        <KpiCard icon={<Briefcase className="h-5 w-5 text-emerald-600" />} title="Active Recruiters" value={summary.totalRecruiters} accent="bg-emerald-100 text-emerald-700" />
+        <KpiCard
+          icon={<Users className="h-5 w-5 text-primary" />}
+          title="Candidate roster"
+          value={summary.totalCandidates}
+          accent="bg-primary/10 text-primary"
+          details={`${numberFormatter.format(summary.marketingCandidates || 0)} marketing · ${numberFormatter.format(
+            summary.activeCandidates || 0,
+          )} active`}
+          actionLabel="Open candidates"
+          onAction={() => router.push('/admin/candidates')}
+        />
+        <KpiCard
+          icon={<Briefcase className="h-5 w-5 text-emerald-600" />}
+          title="Active recruiters"
+          value={summary.totalRecruiters}
+          accent="bg-emerald-100 text-emerald-700"
+          details={`${numberFormatter.format(summary.totalRecruiters || 0)} team members`}
+          actionLabel="View team load"
+          onAction={() => router.push('/admin/recruiters')}
+        />
         <KpiCard
           icon={<BarChart3 className="h-5 w-5 text-blue-600" />}
-          title={`Applications (${rangeConfig.label})`}
-          value={summary.totalApplicationsToday}
+          title="Applications awaiting approval"
+          value={pendingCounts.applications}
           accent="bg-blue-100 text-blue-700"
-          details={applicationsTodayDetails}
+          details={
+            pendingCounts.applications > 0
+              ? applicationsTodayDetails
+              : 'All approvals are up to date.'
+          }
+          actionLabel="Review applications"
+          onAction={() => focusPendingApprovals('applications')}
+          actionDisabled={pendingCounts.applications === 0}
         />
         <KpiCard
           icon={<Target className="h-5 w-5 text-pink-600" />}
-          title={`Interviews (${rangeConfig.label})`}
-          value={summary.totalInterviewsToday}
+          title="Interviews awaiting approval"
+          value={pendingCounts.interviews}
           accent="bg-pink-100 text-pink-700"
+          details={
+            pendingCounts.interviews > 0
+              ? `${numberFormatter.format(summary.totalInterviewsToday || 0)} logged this ${rangeConfig.shortLabel}`
+              : 'No interviews pending'
+          }
+          actionLabel="Review interviews"
+          onAction={() => focusPendingApprovals('interviews')}
+          actionDisabled={pendingCounts.interviews === 0}
         />
         <KpiCard
           icon={<ClipboardList className="h-5 w-5 text-purple-600" />}
-          title={`Assessments (${rangeConfig.label})`}
-          value={summary.totalAssessmentsToday}
+          title="Assessments awaiting approval"
+          value={pendingCounts.assessments}
           accent="bg-purple-100 text-purple-700"
+          details={
+            pendingCounts.assessments > 0
+              ? `${numberFormatter.format(summary.totalAssessmentsToday || 0)} logged this ${rangeConfig.shortLabel}`
+              : 'No assessments pending'
+          }
+          actionLabel="Review assessments"
+          onAction={() => focusPendingApprovals('assessments')}
+          actionDisabled={pendingCounts.assessments === 0}
         />
       </div>
 
-      <PendingApprovalsCard
-        approvals={filteredPendingApprovals}
-        onAction={handleApprovalAction}
-        isProcessing={isProcessingApproval}
-        numberFormatter={numberFormatter}
-        dateFormatter={dateFormatter}
-        dateTimeFormatter={dateTimeFormatter}
-        filterValue={pendingRecruiterId}
-        filterOptions={pendingApprovalOptions}
-        onFilterChange={setPendingRecruiterId}
-        bulkProcessing={approvalAction?.type === 'bulk'}
-        canBulkAct={Boolean(canBulkAct)}
-        selectedRecruiterLabel={selectedPendingOption?.label}
-        onBulkAction={handleBulkApprovalAction}
-        pendingCounts={pendingCounts}
-      />
+      <div ref={pendingApprovalsRef} id="pending-approvals">
+        <PendingApprovalsCard
+          approvals={filteredPendingApprovals}
+          onAction={handleApprovalAction}
+          isProcessing={isProcessingApproval}
+          numberFormatter={numberFormatter}
+          dateFormatter={dateFormatter}
+          dateTimeFormatter={dateTimeFormatter}
+          filterValue={pendingRecruiterId}
+          filterOptions={pendingApprovalOptions}
+          onFilterChange={setPendingRecruiterId}
+          bulkProcessing={approvalAction?.type === 'bulk'}
+          canBulkAct={Boolean(canBulkAct)}
+          selectedRecruiterLabel={selectedPendingOption?.label}
+          onBulkAction={handleBulkApprovalAction}
+          pendingCounts={pendingCounts}
+          highlightType={pendingFocusType}
+        />
+      </div>
       <RecentApprovalsCard approvals={recentApprovals} dateTimeFormatter={dateTimeFormatter} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
@@ -719,6 +780,7 @@ const PendingApprovalsCard = ({
   selectedRecruiterLabel,
   onBulkAction,
   pendingCounts,
+  highlightType,
 }) => {
   const hasApplications = approvals.applications.length > 0;
   const hasInterviews = approvals.interviews.length > 0;
@@ -871,6 +933,7 @@ const PendingApprovalsCard = ({
               count={approvals.applications.length}
               entries={approvals.applications.map(renderApplicationRow)}
               numberFormatter={numberFormatter}
+              highlighted={highlightType === 'applications'}
             />
           ) : null}
           {hasInterviews ? (
@@ -879,6 +942,7 @@ const PendingApprovalsCard = ({
               count={approvals.interviews.length}
               entries={approvals.interviews.map(renderInterviewRow)}
               numberFormatter={numberFormatter}
+              highlighted={highlightType === 'interviews'}
             />
           ) : null}
           {hasAssessments ? (
@@ -887,6 +951,7 @@ const PendingApprovalsCard = ({
               count={approvals.assessments.length}
               entries={approvals.assessments.map(renderAssessmentRow)}
               numberFormatter={numberFormatter}
+              highlighted={highlightType === 'assessments'}
             />
           ) : null}
         </div>
@@ -959,15 +1024,20 @@ const RecentApprovalsCard = ({ approvals, dateTimeFormatter }) => {
   );
 };
 
-const PendingSection = ({ label, count, entries, numberFormatter }) => (
-  <div className="space-y-3">
-    <div className="flex items-center justify-between text-xs text-muted-foreground uppercase tracking-wide">
-      <span className="font-semibold">{label}</span>
-      <span>{numberFormatter.format(count)} waiting</span>
+const PendingSection = ({ label, count, entries, numberFormatter, highlighted }) => {
+  const containerClass = highlighted
+    ? 'space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3 transition'
+    : 'space-y-3';
+  return (
+    <div className={containerClass}>
+      <div className="flex items-center justify-between text-xs text-muted-foreground uppercase tracking-wide">
+        <span className="font-semibold">{label}</span>
+        <span>{numberFormatter.format(count)} waiting</span>
+      </div>
+      <div className="space-y-3">{entries}</div>
     </div>
-    <div className="space-y-3">{entries}</div>
-  </div>
-);
+  );
+};
 
 const ApprovalRow = ({ title, subtitle, recruiterLabel, meta, isBusy, onApprove, onReject }) => (
   <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/60 p-4 md:flex-row md:items-center md:justify-between">
@@ -997,14 +1067,29 @@ const ApprovalRow = ({ title, subtitle, recruiterLabel, meta, isBusy, onApprove,
   </div>
 );
 
-const KpiCard = ({ icon, title, value, accent, details }) => (
-  <Card className="flex items-center gap-3 p-5">
-    <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
-    <div>
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
-      <p className="text-2xl font-semibold text-foreground">{numberFormatter.format(value ?? 0)}</p>
-      {details ? <div className="mt-1 text-xs text-muted-foreground">{details}</div> : null}
+const KpiCard = ({ icon, title, value, accent, details, actionLabel, onAction, actionDisabled }) => (
+  <Card className="flex flex-col gap-4 p-5">
+    <div className="flex items-center gap-3">
+      <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
+      <div>
+        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+        <p className="text-2xl font-semibold text-foreground">{numberFormatter.format(value ?? 0)}</p>
+        {details ? <div className="mt-1 text-xs text-muted-foreground">{details}</div> : null}
+      </div>
     </div>
+    {actionLabel && onAction ? (
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        onClick={onAction}
+        disabled={actionDisabled}
+        className="w-full sm:w-auto"
+      >
+        {actionLabel}
+        <ChevronRight className="ml-1 h-4 w-4" />
+      </Button>
+    ) : null}
   </Card>
 );
 
