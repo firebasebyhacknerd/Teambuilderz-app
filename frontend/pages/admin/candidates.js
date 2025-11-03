@@ -10,6 +10,7 @@ import {
   FileText,
   AlertTriangle,
   User,
+  BarChart3,
   TrendingUp,
   CircleUser,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ const sidebarLinks = [
   { href: '/admin/candidates', label: 'Candidates', icon: Users },
   { href: '/admin/recruiters', label: 'Team Management', icon: User },
   { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
+  { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
   { href: '/profile', label: 'My Profile', icon: CircleUser }

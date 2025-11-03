@@ -31,6 +31,7 @@ export const queryKeys = {
   candidateNotes: (token, candidateId) => ['candidate-notes', token, candidateId],
   adminOverview: (token, paramsKey) => ['admin-overview', token, paramsKey ?? null],
   adminActivity: (token, paramsKey) => ['admin-activity', token, paramsKey ?? null],
+  applicationActivityReport: (token, paramsKey) => ['application-activity-report', token, paramsKey ?? null],
   notifications: (token) => ['notifications', token],
   userActivity: (token) => ['user-activity', token],
   users: (token) => ['users', token],
@@ -522,6 +523,32 @@ export const useAdminActivityQuery = (token, enabled = true, params = {}) =>
       recentApprovals: [],
     },
     refetchInterval: 30000,
+  });
+
+export const useApplicationActivityReportQuery = (token, enabled = true, params = {}) =>
+  useQuery({
+    queryKey: queryKeys.applicationActivityReport(token, JSON.stringify(params ?? {})),
+    queryFn: async () => {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/reports/application-activity${query}`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load application activity.');
+    },
+    enabled: Boolean(token) && enabled,
+    placeholderData: {
+      range: { start: null, end: null },
+      filters: { recruiterId: null, candidateId: null },
+      totals: {
+        overall: 0,
+        byRecruiter: [],
+        byCandidate: [],
+        byDate: [],
+      },
+      records: [],
+      generatedAt: null,
+    },
+    refetchInterval: 60000,
   });
 
 export const useNotificationsQuery = (token, enabled = true) =>

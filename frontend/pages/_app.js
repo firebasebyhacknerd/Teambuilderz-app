@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { configureAnalytics, flushAnalytics, track } from '../lib/analytics';
+import API_URL from '../lib/api';
 
 function MyApp({ Component, pageProps }) {
   const [queryClient] = useState(
@@ -44,7 +45,7 @@ function MyApp({ Component, pageProps }) {
 
   useEffect(() => {
     configureAnalytics({
-      endpoint: '/api/v1/analytics',
+      endpoint: `${API_URL}/api/v1/analytics`,
       flushInterval: 15000,
       maxBatchSize: 25,
     });

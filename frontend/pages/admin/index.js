@@ -167,6 +167,71 @@ const applicationsTodayDetails = (
   const [pendingRecruiterId, setPendingRecruiterId] = useState('all');
   const pendingApprovalsRef = useRef(null);
   const [pendingFocusType, setPendingFocusType] = useState(null);
+  const [selectedApprovals, setSelectedApprovals] = useState(() => ({
+    applications: new Set(),
+    interviews: new Set(),
+    assessments: new Set(),
+  }));
+
+  const cloneSelectionBuckets = (source) => ({
+    applications: new Set(source.applications),
+    interviews: new Set(source.interviews),
+    assessments: new Set(source.assessments),
+  });
+
+  const toggleSelection = useCallback((type, id) => {
+    if (!type || !id) return;
+    const numericId = Number(id);
+    if (!Number.isFinite(numericId) || numericId <= 0) return;
+    setSelectedApprovals((prev) => {
+      const next = cloneSelectionBuckets(prev);
+      const bucket = next[type];
+      if (!bucket) {
+        return prev;
+      }
+      if (bucket.has(numericId)) {
+        bucket.delete(numericId);
+      } else {
+        bucket.add(numericId);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectAllForType = useCallback((type, ids) => {
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    setSelectedApprovals((prev) => {
+      const next = cloneSelectionBuckets(prev);
+      const bucket = next[type];
+      if (!bucket) {
+        return prev;
+      }
+      ids
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .forEach((value) => bucket.add(value));
+      return next;
+    });
+  }, []);
+
+  const clearSelectionForType = useCallback((type) => {
+    setSelectedApprovals((prev) => {
+      if (!prev[type] || prev[type].size === 0) {
+        return prev;
+      }
+      const next = cloneSelectionBuckets(prev);
+      next[type].clear();
+      return next;
+    });
+  }, []);
+
+  const clearAllSelections = useCallback(() => {
+    setSelectedApprovals({
+      applications: new Set(),
+      interviews: new Set(),
+      assessments: new Set(),
+    });
+  }, []);
 
   const recentNotes = activity?.recentNotes ?? [];
   const upcomingReminders = activity?.upcomingReminders ?? [];
@@ -181,6 +246,29 @@ const applicationsTodayDetails = (
       },
     [rawPendingApprovals],
   );
+
+  useEffect(() => {
+    setSelectedApprovals((prev) => {
+      const allowed = {
+        applications: new Set(pendingApprovals.applications.map((item) => Number(item.id))),
+        interviews: new Set(pendingApprovals.interviews.map((item) => Number(item.id))),
+        assessments: new Set(pendingApprovals.assessments.map((item) => Number(item.id))),
+      };
+      const next = {
+        applications: new Set([...prev.applications].filter((id) => allowed.applications.has(id))),
+        interviews: new Set([...prev.interviews].filter((id) => allowed.interviews.has(id))),
+        assessments: new Set([...prev.assessments].filter((id) => allowed.assessments.has(id))),
+      };
+      const isSame =
+        next.applications.size === prev.applications.size &&
+        next.interviews.size === prev.interviews.size &&
+        next.assessments.size === prev.assessments.size &&
+        [...next.applications].every((id) => prev.applications.has(id)) &&
+        [...next.interviews].every((id) => prev.interviews.has(id)) &&
+        [...next.assessments].every((id) => prev.assessments.has(id));
+      return isSame ? prev : next;
+    });
+  }, [pendingApprovals]);
   const recentApprovals = activity?.recentApprovals ?? [];
   const pendingApprovalOptions = useMemo(() => {
     const recruiterMap = new Map();
@@ -260,6 +348,26 @@ const applicationsTodayDetails = (
       assessments: filteredPendingApprovals.assessments.length,
     }),
     [filteredPendingApprovals],
+  );
+
+  const selectedCounts = useMemo(() => ({
+    applications: selectedApprovals.applications.size,
+    interviews: selectedApprovals.interviews.size,
+    assessments: selectedApprovals.assessments.size,
+    total:
+      selectedApprovals.applications.size +
+      selectedApprovals.interviews.size +
+      selectedApprovals.assessments.size,
+  }), [selectedApprovals]);
+
+  const isItemSelected = useCallback(
+    (type, id) => {
+      if (!type || !id) return false;
+      const numericId = Number(id);
+      if (!Number.isFinite(numericId) || numericId <= 0) return false;
+      return selectedApprovals[type]?.has(numericId) ?? false;
+    },
+    [selectedApprovals],
   );
   const focusPendingApprovals = useCallback((type) => {
     setPendingFocusType(type);
@@ -411,6 +519,7 @@ const applicationsTodayDetails = (
         throw new Error(message || 'Bulk action failed.');
       }
       await Promise.all([refetchActivity(), refetchOverview()]);
+      clearAllSelections();
     } catch (error) {
       console.error('Bulk approval action failed:', error);
     } finally {
@@ -418,11 +527,91 @@ const applicationsTodayDetails = (
     }
   };
 
+  const handleSelectedApprovalAction = useCallback(
+    async (action) => {
+      if (!token) {
+        return;
+      }
+      const applicationSelection = Array.from(selectedApprovals.applications);
+      const interviewSelection = Array.from(selectedApprovals.interviews);
+      const assessmentSelection = Array.from(selectedApprovals.assessments);
+      if (
+        applicationSelection.length === 0 &&
+        interviewSelection.length === 0 &&
+        assessmentSelection.length === 0
+      ) {
+        return;
+      }
+
+      const payload = {
+        action,
+        types: [],
+      };
+      if (applicationSelection.length) {
+        payload.types.push('applications');
+        payload.applicationIds = applicationSelection;
+      }
+      if (interviewSelection.length) {
+        payload.types.push('interviews');
+        payload.interviewIds = interviewSelection;
+      }
+      if (assessmentSelection.length) {
+        payload.types.push('assessments');
+        payload.assessmentIds = assessmentSelection;
+      }
+      if (payload.types.length === 0) {
+        return;
+      }
+      if (pendingRecruiterId !== 'all' && pendingRecruiterId !== 'unassigned') {
+        const recruiterCandidate = Number(pendingRecruiterId);
+        if (Number.isFinite(recruiterCandidate) && recruiterCandidate > 0) {
+          payload.recruiterId = recruiterCandidate;
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        const actionLabel = action === 'approve' ? 'approve' : 'reject';
+        const confirmed = window.confirm(`Are you sure you want to ${actionLabel} the selected items?`);
+        if (!confirmed) {
+          return;
+        }
+      }
+
+      setApprovalAction({ type: 'bulk', id: `selection-${action}` });
+      try {
+        const response = await fetch(`${API_URL}/api/v1/pending-approvals/bulk`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const message = await response.text();
+          throw new Error(message || 'Selection action failed.');
+        }
+        await Promise.all([refetchActivity(), refetchOverview()]);
+        setSelectedApprovals({
+          applications: new Set(),
+          interviews: new Set(),
+          assessments: new Set(),
+        });
+      } catch (error) {
+        console.error('Selection approval action failed:', error);
+      } finally {
+        setApprovalAction(null);
+      }
+    },
+    [pendingRecruiterId, refetchActivity, refetchOverview, selectedApprovals, token],
+  );
+
   const sidebarLinks = [
     { href: '/admin', label: 'Dashboard', icon: Home },
     { href: '/admin/candidates', label: 'Candidates', icon: Users },
     { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
     { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
+    { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
     { href: '/recruiter/applications', label: 'Applications', icon: FileText },
     { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
     { href: '/profile', label: 'My Profile', icon: CircleUser },
@@ -552,6 +741,13 @@ const applicationsTodayDetails = (
           onBulkAction={handleBulkApprovalAction}
           pendingCounts={pendingCounts}
           highlightType={pendingFocusType}
+          selectedCounts={selectedCounts}
+          onSelectedAction={handleSelectedApprovalAction}
+          isItemSelected={isItemSelected}
+          onToggleSelection={toggleSelection}
+          onSelectAll={selectAllForType}
+          onClearSelection={clearSelectionForType}
+          onClearAllSelections={clearAllSelections}
         />
       </div>
       <RecentApprovalsCard approvals={recentApprovals} dateTimeFormatter={dateTimeFormatter} />
@@ -789,6 +985,13 @@ const PendingApprovalsCard = ({
   onBulkAction,
   pendingCounts,
   highlightType,
+  selectedCounts,
+  onSelectedAction,
+  isItemSelected,
+  onToggleSelection,
+  onSelectAll,
+  onClearSelection,
+  onClearAllSelections,
 }) => {
   const hasApplications = approvals.applications.length > 0;
   const hasInterviews = approvals.interviews.length > 0;
@@ -800,6 +1003,12 @@ const PendingApprovalsCard = ({
       Number(pendingCounts.interviews || 0) +
       Number(pendingCounts.assessments || 0) >
       0);
+  const selectionTotals = {
+    applications: selectedCounts?.applications ?? 0,
+    interviews: selectedCounts?.interviews ?? 0,
+    assessments: selectedCounts?.assessments ?? 0,
+    total: selectedCounts?.total ?? 0,
+  };
 
   const computeBusy = (type, id) => isProcessing?.(type, id) || bulkProcessing;
 
@@ -824,6 +1033,10 @@ const PendingApprovalsCard = ({
         isBusy={computeBusy('application', app.id)}
         onApprove={() => onAction('application', app.id, 'approve')}
         onReject={() => onAction('application', app.id, 'reject')}
+        enableSelection={Boolean(onToggleSelection)}
+        selected={isItemSelected?.('applications', app.id) ?? false}
+        onToggleSelect={() => onToggleSelection?.('applications', app.id)}
+        selectionDisabled={bulkProcessing || isProcessing?.('application', app.id)}
       />
     );
   };
@@ -849,6 +1062,10 @@ const PendingApprovalsCard = ({
         isBusy={computeBusy('interview', interview.id)}
         onApprove={() => onAction('interview', interview.id, 'approve')}
         onReject={() => onAction('interview', interview.id, 'reject')}
+        enableSelection={Boolean(onToggleSelection)}
+        selected={isItemSelected?.('interviews', interview.id) ?? false}
+        onToggleSelect={() => onToggleSelection?.('interviews', interview.id)}
+        selectionDisabled={bulkProcessing || isProcessing?.('interview', interview.id)}
       />
     );
   };
@@ -874,6 +1091,10 @@ const PendingApprovalsCard = ({
         isBusy={computeBusy('assessment', assessment.id)}
         onApprove={() => onAction('assessment', assessment.id, 'approve')}
         onReject={() => onAction('assessment', assessment.id, 'reject')}
+        enableSelection={Boolean(onToggleSelection)}
+        selected={isItemSelected?.('assessments', assessment.id) ?? false}
+        onToggleSelect={() => onToggleSelection?.('assessments', assessment.id)}
+        selectionDisabled={bulkProcessing || isProcessing?.('assessment', assessment.id)}
       />
     );
   };
@@ -909,6 +1130,57 @@ const PendingApprovalsCard = ({
         ) : null}
       </div>
 
+      {onSelectedAction ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 bg-card/50 px-3 py-2 text-xs md:text-sm">
+          <div className="flex flex-col gap-1 text-muted-foreground md:flex-row md:items-center md:gap-2">
+            {selectionTotals.total > 0 ? (
+              <>
+                <span className="font-semibold text-foreground">
+                  {numberFormatter.format(selectionTotals.total)} selected
+                </span>
+                <span>
+                  {numberFormatter.format(selectionTotals.applications)} applications&nbsp;\u2022&nbsp;
+                  {numberFormatter.format(selectionTotals.interviews)} interviews&nbsp;\u2022&nbsp;
+                  {numberFormatter.format(selectionTotals.assessments)} assessments
+                </span>
+              </>
+            ) : (
+              <span>No items selected.</span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={selectionTotals.total === 0 || bulkProcessing}
+              onClick={() => onSelectedAction('approve')}
+            >
+              Approve Selected
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-red-200 text-red-600 hover:bg-red-50"
+              disabled={selectionTotals.total === 0 || bulkProcessing}
+              onClick={() => onSelectedAction('reject')}
+            >
+              Reject Selected
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+              disabled={selectionTotals.total === 0 || bulkProcessing}
+              onClick={() => onClearAllSelections?.()}
+            >
+              Clear Selection
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {canBulkAct && hasAny && onBulkAction && hasBulkable ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 bg-card/50 px-3 py-2 text-xs md:text-sm">
           <span className="text-muted-foreground">
@@ -942,6 +1214,11 @@ const PendingApprovalsCard = ({
               entries={approvals.applications.map(renderApplicationRow)}
               numberFormatter={numberFormatter}
               highlighted={highlightType === 'applications'}
+              selectedCount={selectionTotals.applications}
+              onSelectAll={() =>
+                onSelectAll?.('applications', approvals.applications.map((item) => item.id))
+              }
+              onClearSelection={() => onClearSelection?.('applications')}
             />
           ) : null}
           {hasInterviews ? (
@@ -951,6 +1228,11 @@ const PendingApprovalsCard = ({
               entries={approvals.interviews.map(renderInterviewRow)}
               numberFormatter={numberFormatter}
               highlighted={highlightType === 'interviews'}
+              selectedCount={selectionTotals.interviews}
+              onSelectAll={() =>
+                onSelectAll?.('interviews', approvals.interviews.map((item) => item.id))
+              }
+              onClearSelection={() => onClearSelection?.('interviews')}
             />
           ) : null}
           {hasAssessments ? (
@@ -960,6 +1242,11 @@ const PendingApprovalsCard = ({
               entries={approvals.assessments.map(renderAssessmentRow)}
               numberFormatter={numberFormatter}
               highlighted={highlightType === 'assessments'}
+              selectedCount={selectionTotals.assessments}
+              onSelectAll={() =>
+                onSelectAll?.('assessments', approvals.assessments.map((item) => item.id))
+              }
+              onClearSelection={() => onClearSelection?.('assessments')}
             />
           ) : null}
         </div>
@@ -1032,28 +1319,94 @@ const RecentApprovalsCard = ({ approvals, dateTimeFormatter }) => {
   );
 };
 
-const PendingSection = ({ label, count, entries, numberFormatter, highlighted }) => {
+const PendingSection = ({
+  label,
+  count,
+  entries,
+  numberFormatter,
+  highlighted,
+  selectedCount = 0,
+  onSelectAll,
+  onClearSelection,
+}) => {
   const containerClass = highlighted
     ? 'space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-3 transition'
     : 'space-y-3';
+  const showSelectAll = Boolean(onSelectAll) && count > 0;
+  const showClear = Boolean(onClearSelection) && selectedCount > 0;
+  const showSelectionHelpers = showSelectAll || showClear;
   return (
     <div className={containerClass}>
-      <div className="flex items-center justify-between text-xs text-muted-foreground uppercase tracking-wide">
-        <span className="font-semibold">{label}</span>
-        <span>{numberFormatter.format(count)} waiting</span>
+      <div className="flex flex-col gap-2 text-xs text-muted-foreground uppercase tracking-wide sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold text-foreground">{label}</span>
+          <span>{numberFormatter.format(count)} waiting</span>
+        </div>
+        {showSelectionHelpers ? (
+          <div className="flex flex-wrap items-center gap-2 text-[11px] sm:text-xs">
+            {selectedCount > 0 ? (
+              <span className="font-semibold text-emerald-600">
+                {numberFormatter.format(selectedCount)} selected
+              </span>
+            ) : null}
+            {showSelectAll ? (
+              <button
+                type="button"
+                className="rounded border border-border/60 bg-background px-2 py-1 font-semibold text-foreground transition hover:bg-accent hover:text-accent-foreground"
+                onClick={onSelectAll}
+              >
+                Select All
+              </button>
+            ) : null}
+            {showClear ? (
+              <button
+                type="button"
+                className="rounded border border-border/40 px-2 py-1 text-muted-foreground transition hover:text-foreground"
+                onClick={onClearSelection}
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className="space-y-3">{entries}</div>
     </div>
   );
 };
 
-const ApprovalRow = ({ title, subtitle, recruiterLabel, meta, isBusy, onApprove, onReject }) => (
+const ApprovalRow = ({
+  title,
+  subtitle,
+  recruiterLabel,
+  meta,
+  isBusy,
+  onApprove,
+  onReject,
+  enableSelection = false,
+  selected = false,
+  onToggleSelect,
+  selectionDisabled = false,
+}) => (
   <div className="flex flex-col gap-3 rounded-lg border border-border bg-card/60 p-4 md:flex-row md:items-center md:justify-between">
-    <div className="space-y-1">
-      <p className="text-sm font-semibold text-foreground">{title}</p>
-      {subtitle ? <p className="text-xs text-muted-foreground">{subtitle}</p> : null}
-      {meta ? <p className="text-xs text-muted-foreground">{meta}</p> : null}
-      {recruiterLabel ? <p className="text-xs text-muted-foreground">{recruiterLabel}</p> : null}
+    <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-start">
+      {enableSelection ? (
+        <div className="pt-1 md:pt-0">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            checked={selected}
+            disabled={selectionDisabled}
+            onChange={() => onToggleSelect?.()}
+          />
+        </div>
+      ) : null}
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        {subtitle ? <p className="text-xs text-muted-foreground">{subtitle}</p> : null}
+        {meta ? <p className="text-xs text-muted-foreground">{meta}</p> : null}
+        {recruiterLabel ? <p className="text-xs text-muted-foreground">{recruiterLabel}</p> : null}
+      </div>
     </div>
     <div className="flex items-center gap-2">
       <Button type="button" size="sm" disabled={isBusy} onClick={onApprove} className="flex items-center gap-1">

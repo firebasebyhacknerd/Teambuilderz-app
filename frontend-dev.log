@@ -7,4 +7,16 @@
   - Environments: .env
 
  ✓ Starting...
- ✓ Ready in 2.7s
+ ✓ Ready in 2.6s
+ ○ Compiling /login ...
+ ✓ Compiled /login in 3.5s (448 modules)
+ ✓ Compiled in 455ms (448 modules)
+ GET /login 200 in 4571ms
+ ✓ Compiled /_error in 412ms (450 modules)
+ POST /api/v1/analytics 404 in 500ms
+ POST /api/v1/analytics 404 in 21ms
+ POST /api/v1/analytics 404 in 20ms
+ POST /api/v1/analytics 404 in 15ms
+ POST /api/v1/analytics 404 in 17ms
+ POST /api/v1/analytics 404 in 14ms
+ POST /api/v1/analytics 404 in 11ms

@@ -4,6 +4,7 @@ services:
   tbz_postgres:
     image: postgres:15-alpine
     container_name: tbz_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: teambuilderz_user
       POSTGRES_PASSWORD: teambuilderz_password
@@ -21,6 +22,7 @@ services:
       context: ./backend 
       dockerfile: Dockerfile
     container_name: tbz_backend
+    restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
@@ -32,6 +34,7 @@ services:
       JWT_SECRET: your_super_secret_jwt_key_here_change_in_production
       ADMIN_PASSWORD: admin123
       RECRUITER_PASSWORD: recruit123
+      CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000,http://tbz_frontend:3000,http://host.docker.internal:3000
     depends_on:
       tbz_postgres:
         condition: service_healthy
@@ -41,6 +44,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: tbz_frontend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:

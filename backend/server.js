@@ -134,7 +134,43 @@ function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
 }
 
 const AUTH_COOKIE_NAME = 'tbz_auth';
-const COOKIE_OPTIONS = {\n  httpOnly: true,\n  sameSite: 'lax',\n  secure: process.env.NODE_ENV === 'production',\n  maxAge: 24 * 60 * 60 * 1000,\n};\nconst CLEAR_COOKIE_OPTIONS = {\n  httpOnly: true,\n  sameSite: 'lax',\n  secure: process.env.NODE_ENV === 'production',\n};\nconst ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')\n  .split(',')\n  .map((origin) => origin.trim())\n  .filter(Boolean);
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 24 * 60 * 60 * 1000,
+};
+const CLEAR_COOKIE_OPTIONS = {
+  httpOnly: true,
+  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',
+};
+const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const LOCAL_IP_REGEXES = [
+  /^127\.(\d{1,3}\.){2}\d{1,3}$/u,
+  /^10\.(\d{1,3}\.){2}\d{1,3}$/u,
+  /^192\.168\.(\d{1,3})\.(\d{1,3})$/u,
+  /^172\.(1[6-9]|2\d|3[0-1])\.(\d{1,3})\.(\d{1,3})$/u,
+];
+
+function isLocalNetworkOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return false;
+    }
+    if (url.hostname === 'localhost') {
+      return true;
+    }
+    return LOCAL_IP_REGEXES.some((regex) => regex.test(url.hostname));
+  } catch (error) {
+    return false;
+  }
+}
 
 const authLimiter = createLimiter({
   windowMs: 5 * 60 * 1000,
@@ -166,7 +202,17 @@ const pool = new Pool({
 
 // Middleware
 app.use(
-  composeMiddleware([\n    cors({\n      origin: (origin, callback) => {\n        if (!origin || ALLOWED_ORIGINS.includes(origin)) {\n          callback(null, true);\n        } else {\n          callback(new Error('Not allowed by CORS'));\n        }\n      },\n      credentials: true,\n    }),
+  composeMiddleware([
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin) || isLocalNetworkOrigin(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true,
+    }),
     bodyParser.json(),
   ]),
 );
@@ -347,6 +393,18 @@ async function ensureTables(db) {
       );
     `,
     `
+      CREATE TABLE recruiter_candidate_activity (
+        id SERIAL PRIMARY KEY,
+        recruiter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+        activity_date DATE NOT NULL,
+        applications_count INTEGER NOT NULL,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(recruiter_id, candidate_id, activity_date)
+      );
+    `,
+    `
       CREATE TABLE audit_logs (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES users(id),
@@ -519,9 +577,25 @@ async function ensureSchemaEvolution(db) {
     ensureAssessmentColumns(db),
     ensureReminderNoteLink(db),
     ensureUserActivityColumns(db),
+    ensureRecruiterCandidateActivityTable(db),
   ]);
 
   await ensureCandidateAssignments(db);
+}
+
+async function ensureRecruiterCandidateActivityTable(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS recruiter_candidate_activity (
+      id SERIAL PRIMARY KEY,
+      recruiter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      candidate_id INTEGER REFERENCES candidates(id) ON DELETE CASCADE,
+      activity_date DATE NOT NULL,
+      applications_count INTEGER NOT NULL,
+      created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(recruiter_id, candidate_id, activity_date)
+    );
+  `);
 }
 
 async function setupDatabase() {
@@ -699,7 +773,16 @@ app.get('/api/v1/profile', verifyToken, async (req, res) => {
 
 app.put('/api/v1/profile', profileLimiter, verifyToken, async (req, res) => {
   try {
-    const { name, email, password, daily_quota } = req.body;\n\n    if (password) {\n      const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[\\W_]).{8,}$/;\n      if (!passwordPolicy.test(password)) {\n        return res.status(400).json({\n          message: 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.',\n        });\n      }\n    }\n
+    const { name, email, password, daily_quota } = req.body;
+
+    if (password) {
+      const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+      if (!passwordPolicy.test(password)) {
+        return res.status(400).json({
+          message: 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.',
+        });
+      }
+    }
     const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.userId]);
     if (userResult.rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
@@ -1759,7 +1842,7 @@ app.post('/api/v1/applications/:id/approval', verifyToken, requireRole('Admin'),
       `
       UPDATE applications
       SET is_approved = $1,
-          approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+          approved_by = CASE WHEN $1 THEN $2::int ELSE NULL END,
           approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = $3
@@ -2052,7 +2135,7 @@ app.post('/api/v1/interviews/:id/approval', verifyToken, requireRole('Admin'), a
       `
         UPDATE interviews
         SET is_approved = $1,
-            approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+            approved_by = CASE WHEN $1 THEN $2::int ELSE NULL END,
             approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
@@ -2268,7 +2351,7 @@ app.post('/api/v1/assessments/:id/approval', verifyToken, requireRole('Admin'), 
       `
         UPDATE assessments
         SET is_approved = $1,
-            approved_by = CASE WHEN $1 THEN $2 ELSE NULL END,
+            approved_by = CASE WHEN $1 THEN $2::int ELSE NULL END,
             approved_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
@@ -2936,24 +3019,54 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
 });
 
 app.post('/api/v1/pending-approvals/bulk', verifyToken, requireRole('Admin'), async (req, res) => {
-  const recruiterId = parseInt(req.body?.recruiterId, 10);
+  const recruiterIdRaw = parseInt(req.body?.recruiterId, 10);
   const action = typeof req.body?.action === 'string' ? req.body.action.toLowerCase() : '';
   const validActions = ['approve', 'reject'];
   const validTypes = new Set(['applications', 'interviews', 'assessments']);
   const requestedTypes = Array.isArray(req.body?.types)
     ? req.body.types.map((value) => String(value).toLowerCase())
     : ['applications', 'interviews', 'assessments'];
-  const typeSet = Array.from(new Set(requestedTypes.filter((value) => validTypes.has(value))));
 
-  if (!Number.isFinite(recruiterId) || recruiterId <= 0) {
-    return res.status(400).json({ message: 'recruiterId must be a positive integer.' });
+  const parseIdArray = (value) => {
+    if (!Array.isArray(value)) return [];
+    const ids = value
+      .map((item) => parseInt(item, 10))
+      .filter((id) => Number.isFinite(id) && id > 0);
+    return Array.from(new Set(ids));
+  };
+
+  const applicationIds = parseIdArray(req.body?.applicationIds);
+  const interviewIds = parseIdArray(req.body?.interviewIds);
+  const assessmentIds = parseIdArray(req.body?.assessmentIds);
+  const hasExplicitSelection = applicationIds.length > 0 || interviewIds.length > 0 || assessmentIds.length > 0;
+
+  let typeSet = Array.from(new Set(requestedTypes.filter((value) => validTypes.has(value))));
+  if (typeSet.length === 0) {
+    typeSet = ['applications', 'interviews', 'assessments'];
   }
+  if (hasExplicitSelection) {
+    typeSet = [];
+    if (applicationIds.length > 0) typeSet.push('applications');
+    if (interviewIds.length > 0) typeSet.push('interviews');
+    if (assessmentIds.length > 0) typeSet.push('assessments');
+  }
+
   if (!validActions.includes(action)) {
     return res.status(400).json({ message: 'action must be "approve" or "reject".' });
   }
   if (typeSet.length === 0) {
     return res.status(400).json({ message: 'types must include at least one supported entry.' });
   }
+
+  const recruiterId = Number.isFinite(recruiterIdRaw) && recruiterIdRaw > 0 ? recruiterIdRaw : null;
+  if (!hasExplicitSelection && recruiterId === null) {
+    return res.status(400).json({ message: 'recruiterId must be provided when no explicit selection is supplied.' });
+  }
+
+  const buildSelectionClause = (useIds, field = 'id') =>
+    useIds
+      ? { text: `id = ANY($1::int[]) AND COALESCE(is_approved, false) = false`, params: [] }
+      : { text: `recruiter_id = $1 AND COALESCE(is_approved, false) = false`, params: [] };
 
   const client = await pool.connect();
   try {
@@ -2965,107 +3078,120 @@ app.post('/api/v1/pending-approvals/bulk', verifyToken, requireRole('Admin'), as
     };
 
     if (typeSet.includes('applications')) {
-      const { rows: existingApplications } = await client.query(
-        `
-          SELECT
-            *,
-            (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
-          FROM applications
-          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
-        `,
-        [recruiterId],
-      );
-      if (existingApplications.length > 0) {
-        const applicationIds = existingApplications.map((row) => row.id);
-        if (action === 'approve') {
-          const { rows: updatedApplications } = await client.query(
-            `
-              UPDATE applications
-              SET is_approved = true,
-                  approved_by = $1,
-                  approved_at = CURRENT_TIMESTAMP,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE id = ANY($2::int[])
-              RETURNING *
-            `,
-            [req.user.userId, applicationIds],
-          );
-          summary.applications = updatedApplications.length;
-          const updatedMap = new Map(updatedApplications.map((row) => [row.id, row]));
-          for (const original of existingApplications) {
-            const updated = updatedMap.get(original.id);
-            if (!updated) continue;
-            await client.query(
+      const useExplicit = applicationIds.length > 0;
+      if (useExplicit || recruiterId !== null) {
+        const clause = buildSelectionClause(useExplicit);
+        const params = useExplicit ? [applicationIds] : [recruiterId];
+        const { rows: existingApplications } = await client.query(
+          `
+            SELECT
+              *,
+              (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
+            FROM applications
+            WHERE ${clause.text}
+          `,
+          params,
+        );
+        if (existingApplications.length > 0) {
+          const targetApplicationIds = existingApplications.map((row) => row.id);
+          if (action === 'approve') {
+            const { rows: updatedApplications } = await client.query(
               `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
-                VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
+                UPDATE applications
+                SET is_approved = true,
+                    approved_by = $1::int,
+                    approved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ANY($2::int[])
+                RETURNING *
               `,
-              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              [req.user.userId, targetApplicationIds],
             );
-          }
-        } else {
-          const { rows: deletedApplications } = await client.query(
-            `
-              DELETE FROM applications
-              WHERE id = ANY($1::int[])
-              RETURNING *,
-                (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
-            `,
-            [applicationIds],
-          );
-          summary.applications = deletedApplications.length;
-          const datesToRefresh = new Set();
-          for (const row of deletedApplications) {
-            const dateKey = row.application_date
-              ? new Date(row.application_date).toISOString().split('T')[0]
-              : new Date().toISOString().split('T')[0];
-            datesToRefresh.add(dateKey);
-            await client.query(
-              `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values)
-                VALUES ($1, 'DELETE', 'applications', $2, $3)
-              `,
-              [req.user.userId, row.id, JSON.stringify(row)],
-            );
-            await client.query(
-              `
-                INSERT INTO alerts (user_id, alert_type, title, message, priority)
-                VALUES ($1, 'submission_rejected', 'Application Rejected', $2, 2)
-              `,
-              [
-                recruiterId,
-                `An admin rejected the application for ${row.candidate_name || 'their candidate'}. Please update and resubmit.`,
-              ],
-            );
-          }
-          for (const dateKey of datesToRefresh) {
-            const aggregate = await client.query(
-              `
-                SELECT COALESCE(SUM(applications_count), 0) AS total
-                FROM applications
-                WHERE recruiter_id = $1 AND application_date = $2
-              `,
-              [recruiterId, dateKey],
-            );
-            const totalForDay = Number(aggregate.rows[0]?.total || 0);
-            if (totalForDay > 0) {
+            summary.applications = updatedApplications.length;
+            const updatedMap = new Map(updatedApplications.map((row) => [row.id, row]));
+            for (const original of existingApplications) {
+              const updated = updatedMap.get(original.id);
+              if (!updated) continue;
               await client.query(
                 `
-                  INSERT INTO daily_activity (user_id, activity_date, applications_count)
-                  VALUES ($1, $2, $3)
-                  ON CONFLICT (user_id, activity_date)
-                  DO UPDATE SET applications_count = EXCLUDED.applications_count
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                  VALUES ($1, 'UPDATE', 'applications', $2, $3, $4)
                 `,
-                [recruiterId, dateKey, totalForDay],
+                [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
               );
-            } else {
+            }
+          } else {
+            const { rows: deletedApplications } = await client.query(
+              `
+                DELETE FROM applications
+                WHERE id = ANY($1::int[])
+                RETURNING *,
+                  (SELECT name FROM candidates WHERE id = applications.candidate_id) AS candidate_name
+              `,
+              [targetApplicationIds],
+            );
+            summary.applications = deletedApplications.length;
+            const refreshTargets = new Map();
+            for (const row of deletedApplications) {
+              const recruiterKey = row.recruiter_id || recruiterId;
+              if (!recruiterKey) continue;
+              const dateKey = row.application_date
+                ? new Date(row.application_date).toISOString().split('T')[0]
+                : new Date().toISOString().split('T')[0];
+              const existingSet = refreshTargets.get(recruiterKey) ?? new Set();
+              existingSet.add(dateKey);
+              refreshTargets.set(recruiterKey, existingSet);
               await client.query(
                 `
-                  DELETE FROM daily_activity
-                  WHERE user_id = $1 AND activity_date = $2
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values)
+                  VALUES ($1, 'DELETE', 'applications', $2, $3)
                 `,
-                [recruiterId, dateKey],
+                [req.user.userId, row.id, JSON.stringify(row)],
               );
+              if (recruiterKey) {
+                await client.query(
+                  `
+                    INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                    VALUES ($1, 'submission_rejected', 'Application Rejected', $2, 2)
+                  `,
+                  [
+                    recruiterKey,
+                    `An admin rejected the application for ${row.candidate_name || 'their candidate'}. Please update and resubmit.`,
+                  ],
+                );
+              }
+            }
+            for (const [recruiterKey, dateSet] of refreshTargets.entries()) {
+              for (const dateKey of dateSet) {
+                const aggregate = await client.query(
+                  `
+                    SELECT COALESCE(SUM(applications_count), 0) AS total
+                    FROM applications
+                    WHERE recruiter_id = $1 AND application_date = $2
+                  `,
+                  [recruiterKey, dateKey],
+                );
+                const totalForDay = Number(aggregate.rows[0]?.total || 0);
+                if (totalForDay > 0) {
+                  await client.query(
+                    `
+                      INSERT INTO daily_activity (user_id, activity_date, applications_count)
+                      VALUES ($1, $2, $3)
+                      ON CONFLICT (user_id, activity_date)
+                      DO UPDATE SET applications_count = EXCLUDED.applications_count
+                    `,
+                    [recruiterKey, dateKey, totalForDay],
+                  );
+                } else {
+                  await client.query(
+                    `
+                      DELETE FROM daily_activity
+                      WHERE user_id = $1 AND activity_date = $2
+                    `,
+                    [recruiterKey, dateKey],
+                  );
+                }
+              }
             }
           }
         }
@@ -3073,174 +3199,347 @@ app.post('/api/v1/pending-approvals/bulk', verifyToken, requireRole('Admin'), as
     }
 
     if (typeSet.includes('interviews')) {
-      const { rows: existingInterviews } = await client.query(
-        `
-          SELECT
-            *,
-            (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
-          FROM interviews
-          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
-        `,
-        [recruiterId],
-      );
-      if (existingInterviews.length > 0) {
-        const interviewIds = existingInterviews.map((row) => row.id);
-        if (action === 'approve') {
-          const { rows: updatedInterviews } = await client.query(
-            `
-              UPDATE interviews
-              SET is_approved = true,
-                  approved_by = $1,
-                  approved_at = CURRENT_TIMESTAMP,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE id = ANY($2::int[])
-              RETURNING *
-            `,
-            [req.user.userId, interviewIds],
-          );
-          summary.interviews = updatedInterviews.length;
-          const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
-          for (const original of existingInterviews) {
-            const updated = updatedMap.get(original.id);
-            if (!updated) continue;
-            await client.query(
+      const useExplicit = interviewIds.length > 0;
+      if (useExplicit || recruiterId !== null) {
+        const clause = buildSelectionClause(useExplicit);
+        const params = useExplicit ? [interviewIds] : [recruiterId];
+        const { rows: existingInterviews } = await client.query(
+          `
+            SELECT
+              *,
+              (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
+            FROM interviews
+            WHERE ${clause.text}
+          `,
+          params,
+        );
+        if (existingInterviews.length > 0) {
+          const targetInterviewIds = existingInterviews.map((row) => row.id);
+          if (action === 'approve') {
+            const { rows: updatedInterviews } = await client.query(
               `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
-                VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+                UPDATE interviews
+                SET is_approved = true,
+                    approved_by = $1::int,
+                    approved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ANY($2::int[])
+                RETURNING *
               `,
-              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              [req.user.userId, targetInterviewIds],
             );
-          }
-        } else {
-          const { rows: updatedInterviews } = await client.query(
-            `
-              UPDATE interviews
-              SET is_approved = false,
-                  status = CASE WHEN status = 'rejected' THEN status ELSE 'rejected' END,
-                  approved_by = NULL,
-                  approved_at = NULL,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE id = ANY($1::int[])
-              RETURNING *,
-                (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
-            `,
-            [interviewIds],
-          );
-          summary.interviews = updatedInterviews.length;
-          const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
-          for (const original of existingInterviews) {
-            const updated = updatedMap.get(original.id);
-            if (!updated) continue;
-            await client.query(
+            summary.interviews = updatedInterviews.length;
+            const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
+            for (const original of existingInterviews) {
+              const updated = updatedMap.get(original.id);
+              if (!updated) continue;
+              await client.query(
+                `
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                  VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+                `,
+                [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              );
+            }
+          } else {
+            const { rows: updatedInterviews } = await client.query(
               `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
-                VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+                UPDATE interviews
+                SET is_approved = false,
+                    status = CASE WHEN status = 'rejected' THEN status ELSE 'rejected' END,
+                    approved_by = NULL,
+                    approved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ANY($1::int[])
+                RETURNING *,
+                  (SELECT name FROM candidates WHERE id = interviews.candidate_id) AS candidate_name
               `,
-              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              [targetInterviewIds],
             );
-            await client.query(
-              `
-                INSERT INTO alerts (user_id, alert_type, title, message, priority)
-                VALUES ($1, 'submission_rejected', 'Interview Rejected', $2, 2)
-              `,
-              [
-                recruiterId,
-                `An admin rejected the interview for ${original.candidate_name || 'their candidate'}. Please review the details and resubmit.`,
-              ],
-            );
+            summary.interviews = updatedInterviews.length;
+            const updatedMap = new Map(updatedInterviews.map((row) => [row.id, row]));
+            for (const original of existingInterviews) {
+              const updated = updatedMap.get(original.id);
+              if (!updated) continue;
+              await client.query(
+                `
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                  VALUES ($1, 'UPDATE', 'interviews', $2, $3, $4)
+                `,
+                [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              );
+              const recruiterKey = original.recruiter_id || recruiterId;
+              if (recruiterKey) {
+                await client.query(
+                  `
+                    INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                    VALUES ($1, 'submission_rejected', 'Interview Rejected', $2, 2)
+                  `,
+                  [
+                    recruiterKey,
+                    `An admin rejected the interview for ${original.candidate_name || 'their candidate'}. Please review the details and resubmit.`,
+                  ],
+                );
+              }
+            }
           }
         }
       }
     }
 
     if (typeSet.includes('assessments')) {
-      const { rows: existingAssessments } = await client.query(
-        `
-          SELECT
-            *,
-            (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
-          FROM assessments
-          WHERE recruiter_id = $1 AND COALESCE(is_approved, false) = false
-        `,
-        [recruiterId],
-      );
-      if (existingAssessments.length > 0) {
-        const assessmentIds = existingAssessments.map((row) => row.id);
-        if (action === 'approve') {
-          const { rows: updatedAssessments } = await client.query(
-            `
-              UPDATE assessments
-              SET is_approved = true,
-                  approved_by = $1,
-                  approved_at = CURRENT_TIMESTAMP,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE id = ANY($2::int[])
-              RETURNING *
-            `,
-            [req.user.userId, assessmentIds],
-          );
-          summary.assessments = updatedAssessments.length;
-          const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
-          for (const original of existingAssessments) {
-            const updated = updatedMap.get(original.id);
-            if (!updated) continue;
-            await client.query(
+      const useExplicit = assessmentIds.length > 0;
+      if (useExplicit || recruiterId !== null) {
+        const clause = buildSelectionClause(useExplicit);
+        const params = useExplicit ? [assessmentIds] : [recruiterId];
+        const { rows: existingAssessments } = await client.query(
+          `
+            SELECT
+              *,
+              (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
+            FROM assessments
+            WHERE ${clause.text}
+          `,
+          params,
+        );
+        if (existingAssessments.length > 0) {
+          const targetAssessmentIds = existingAssessments.map((row) => row.id);
+          if (action === 'approve') {
+            const { rows: updatedAssessments } = await client.query(
               `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
-                VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+                UPDATE assessments
+                SET is_approved = true,
+                    approved_by = $1::int,
+                    approved_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ANY($2::int[])
+                RETURNING *
               `,
-              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              [req.user.userId, targetAssessmentIds],
             );
-          }
-        } else {
-          const { rows: updatedAssessments } = await client.query(
-            `
-              UPDATE assessments
-              SET is_approved = false,
-                  approved_by = NULL,
-                  approved_at = NULL,
-                  updated_at = CURRENT_TIMESTAMP
-              WHERE id = ANY($1::int[])
-              RETURNING *,
-                (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
-            `,
-            [assessmentIds],
-          );
-          summary.assessments = updatedAssessments.length;
-          const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
-          for (const original of existingAssessments) {
-            const updated = updatedMap.get(original.id);
-            if (!updated) continue;
-            await client.query(
+            summary.assessments = updatedAssessments.length;
+            const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
+            for (const original of existingAssessments) {
+              const updated = updatedMap.get(original.id);
+              if (!updated) continue;
+              await client.query(
+                `
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                  VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+                `,
+                [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              );
+            }
+          } else {
+            const { rows: updatedAssessments } = await client.query(
               `
-                INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
-                VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+                UPDATE assessments
+                SET is_approved = false,
+                    approved_by = NULL,
+                    approved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ANY($1::int[])
+                RETURNING *,
+                  (SELECT name FROM candidates WHERE id = assessments.candidate_id) AS candidate_name
               `,
-              [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              [targetAssessmentIds],
             );
-            await client.query(
-              `
-                INSERT INTO alerts (user_id, alert_type, title, message, priority)
-                VALUES ($1, 'submission_rejected', 'Assessment Rejected', $2, 2)
-              `,
-              [
-                recruiterId,
-                `An admin rejected the assessment for ${original.candidate_name || 'their candidate'}. Please review and resubmit.`,
-              ],
-            );
+            summary.assessments = updatedAssessments.length;
+            const updatedMap = new Map(updatedAssessments.map((row) => [row.id, row]));
+            for (const original of existingAssessments) {
+              const updated = updatedMap.get(original.id);
+              if (!updated) continue;
+              await client.query(
+                `
+                  INSERT INTO audit_logs (user_id, action, table_name, record_id, old_values, new_values)
+                  VALUES ($1, 'UPDATE', 'assessments', $2, $3, $4)
+                `,
+                [req.user.userId, original.id, JSON.stringify(original), JSON.stringify(updated)],
+              );
+              const recruiterKey = original.recruiter_id || recruiterId;
+              if (recruiterKey) {
+                await client.query(
+                  `
+                    INSERT INTO alerts (user_id, alert_type, title, message, priority)
+                    VALUES ($1, 'submission_rejected', 'Assessment Rejected', $2, 2)
+                  `,
+                  [
+                    recruiterKey,
+                    `An admin rejected the assessment for ${original.candidate_name || 'their candidate'}. Please review and resubmit.`,
+                  ],
+                );
+              }
+            }
           }
         }
       }
     }
 
     await client.query('COMMIT');
-    res.json({ action, recruiterId, summary, types: typeSet });
+    res.json({
+      action,
+      summary,
+      types: typeSet,
+      mode: hasExplicitSelection ? 'selection' : 'recruiter',
+      recruiterId: recruiterId ?? null,
+    });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Error processing bulk pending approvals:', error);
     res.status(500).json({ message: 'Internal server error' });
   } finally {
     client.release();
+  }
+});
+
+app.get('/api/v1/reports/application-activity', verifyToken, requireRole('Admin'), async (req, res) => {
+  try {
+    const parseISODate = (value) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return null;
+      return parsed;
+    };
+
+    const today = new Date();
+    const defaultEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const defaultStart = new Date(defaultEnd);
+    defaultStart.setDate(defaultEnd.getDate() - 29);
+
+    let startDate = parseISODate(req.query?.date_from) ?? defaultStart;
+    let endDate = parseISODate(req.query?.date_to) ?? defaultEnd;
+    if (startDate > endDate) {
+      const tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+    }
+
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+
+    const conditions = [];
+    const params = [];
+    let paramIndex = 1;
+
+    conditions.push(`rca.activity_date BETWEEN $${paramIndex++} AND $${paramIndex++}`);
+    params.push(startDateStr, endDateStr);
+
+    let recruiterId = null;
+    if (req.query?.recruiter_id) {
+      recruiterId = parseInt(req.query.recruiter_id, 10);
+      if (Number.isNaN(recruiterId)) {
+        return res.status(400).json({ message: 'Invalid recruiter_id parameter' });
+      }
+      conditions.push(`rca.recruiter_id = $${paramIndex++}`);
+      params.push(recruiterId);
+    }
+
+    let candidateId = null;
+    if (req.query?.candidate_id) {
+      candidateId = parseInt(req.query.candidate_id, 10);
+      if (Number.isNaN(candidateId)) {
+        return res.status(400).json({ message: 'Invalid candidate_id parameter' });
+      }
+      conditions.push(`rca.candidate_id = $${paramIndex++}`);
+      params.push(candidateId);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const { rows } = await pool.query(
+      `
+        SELECT
+          rca.activity_date,
+          rca.recruiter_id,
+          u.name AS recruiter_name,
+          rca.candidate_id,
+          c.name AS candidate_name,
+          rca.applications_count
+        FROM recruiter_candidate_activity rca
+        JOIN users u ON u.id = rca.recruiter_id
+        JOIN candidates c ON c.id = rca.candidate_id
+        ${whereClause}
+        ORDER BY rca.activity_date DESC, recruiter_name, candidate_name
+      `,
+      params,
+    );
+
+    const recruiterTotals = new Map();
+    const candidateTotals = new Map();
+    const dateTotals = new Map();
+    let overallTotal = 0;
+
+    const records = rows.map((row) => {
+      const count = Number(row.applications_count) || 0;
+      const recruiterKey = Number(row.recruiter_id);
+      const candidateKey = Number(row.candidate_id);
+      const dateKey =
+        row.activity_date instanceof Date
+          ? row.activity_date.toISOString().split('T')[0]
+          : row.activity_date;
+
+      overallTotal += count;
+
+      const recruiterEntry = recruiterTotals.get(recruiterKey) ?? {
+        recruiterId: recruiterKey,
+        recruiterName: row.recruiter_name,
+        totalApplications: 0,
+      };
+      recruiterEntry.totalApplications += count;
+      recruiterTotals.set(recruiterKey, recruiterEntry);
+
+      const candidateEntry = candidateTotals.get(candidateKey) ?? {
+        candidateId: candidateKey,
+        candidateName: row.candidate_name,
+        totalApplications: 0,
+      };
+      candidateEntry.totalApplications += count;
+      candidateTotals.set(candidateKey, candidateEntry);
+
+      const dateEntry = dateTotals.get(dateKey) ?? 0;
+      dateTotals.set(dateKey, dateEntry + count);
+
+      return {
+        activityDate: dateKey,
+        recruiter: {
+          id: recruiterKey,
+          name: row.recruiter_name,
+        },
+        candidate: {
+          id: candidateKey,
+          name: row.candidate_name,
+        },
+        applicationsCount: count,
+      };
+    });
+
+    const sortByTotal = (a, b) => b.totalApplications - a.totalApplications;
+
+    const totals = {
+      overall: overallTotal,
+      byRecruiter: Array.from(recruiterTotals.values()).sort(sortByTotal),
+      byCandidate: Array.from(candidateTotals.values()).sort(sortByTotal),
+      byDate: Array.from(dateTotals.entries())
+        .map(([date, total]) => ({ date, totalApplications: total }))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    };
+
+    res.json({
+      range: {
+        start: startDateStr,
+        end: endDateStr,
+      },
+      filters: {
+        recruiterId: recruiterId ?? null,
+        candidateId: candidateId ?? null,
+      },
+      totals,
+      records,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error building application activity report:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -4256,6 +4555,7 @@ async function startServer() {
     console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
     console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
     console.log('    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)');
+    console.log('    GET  /api/v1/reports/application-activity - Recruiter & candidate application totals (requires admin)');
     console.log('    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)');
     console.log('  Notifications:');
     console.log('    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)');
