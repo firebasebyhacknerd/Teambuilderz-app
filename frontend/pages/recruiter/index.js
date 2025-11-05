@@ -395,25 +395,28 @@ const RecruiterDashboard = () => {
       }
     >
       {toastAlert ? (
-        <div className="fixed top-4 right-4 z-50 w-full max-w-sm">
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-lg">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" />
+        <div className="fixed top-4 right-4 z-50 w-full max-w-sm" role="status" aria-live="assertive">
+          <div className="group overflow-hidden rounded-xl border border-amber-400/30 bg-amber-500/10 shadow-lg shadow-black/10 ring-1 ring-black/5 backdrop-blur-sm transition-transform duration-200 hover:-translate-y-0.5">
+            <div className="flex items-start gap-3 px-4 py-3">
+              <span className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-background/70 text-amber-700 shadow-inner">
+                <AlertTriangle className="h-4 w-4" />
+              </span>
               <div className="flex-1 space-y-1">
                 <p className="text-sm font-semibold text-foreground">Submission Rejected</p>
-                <p className="text-xs text-amber-800">
+                <p className="text-xs leading-relaxed text-amber-800">
                   {toastAlert.message || 'An admin rejected one of your submissions. Review the details to resubmit.'}
                 </p>
               </div>
-            </div>
-            <div className="mt-3 flex items-center justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={handleToastDismiss}>
+              <Button variant="ghost" size="sm" onClick={handleToastDismiss} className="text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground">
                 Dismiss
               </Button>
-              <Button size="sm" onClick={handleToastView}>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-4 pb-3">
+              <Button size="sm" onClick={handleToastView} className="gap-2">
                 View Alerts
               </Button>
             </div>
+            <div className="h-1 w-full bg-gradient-to-r from-amber-400/60 to-transparent" />
           </div>
         </div>
       ) : null}
