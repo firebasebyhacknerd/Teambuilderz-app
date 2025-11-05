@@ -254,10 +254,9 @@ This document outlines all the features implemented in the TeamBuilderz recruitm
 4. Start with Docker: `docker-compose up --build`
 5. Or run locally: `npm run dev`
 
-### Default Credentials
+### Initial Access
 
-- **Admin**: admin@tbz.us / admin123
-- **Recruiter**: sarthi@tbz.us / recruit123
+- Configure initial admin and recruiter accounts via the optional seeding environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.), or invite users through the Admin → Team Management page after bootstrapping the system.
 
 ## 📈 Performance Features
 

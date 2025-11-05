@@ -1,10 +1,12 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import { useCallback } from 'react';
 import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { useCandidatesQuery } from '../../lib/queryHooks';
 import API_URL from '../../lib/api';
@@ -27,12 +29,16 @@ const stageLabels = {
   inactive: 'Inactive',
 };
 
+const stageOptions = Object.entries(stageLabels).map(([value, label]) => ({ value, label }));
+
 const CandidatesPage = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Recruiter');
   const [userRole, setUserRole] = useState('Recruiter');
   const [searchTerm, setSearchTerm] = useState('');
+  const [stageFilter, setStageFilter] = useState('all');
+  const [assignmentFilter, setAssignmentFilter] = useState('all');
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -52,15 +58,33 @@ const CandidatesPage = () => {
   const { data: candidates = [], isLoading } = useCandidatesQuery(token, Boolean(token));
 
   const filteredCandidates = useMemo(() => {
-    if (!searchTerm.trim()) return candidates;
+    if (!candidates.length) {
+      return [];
+    }
     const term = searchTerm.trim().toLowerCase();
     return candidates.filter((candidate) => {
       const name = (candidate.name || '').toLowerCase();
       const email = (candidate.email || '').toLowerCase();
       const stage = (candidate.current_stage || '').toLowerCase();
-      return name.includes(term) || email.includes(term) || stage.includes(term);
+      const assigned = Boolean(candidate.assigned_recruiter_id);
+      const matchesSearch = !term || name.includes(term) || email.includes(term) || stage.includes(term);
+      const matchesStage = stageFilter === 'all' || stage === stageFilter;
+      const matchesAssignment =
+        assignmentFilter === 'all' ||
+        (assignmentFilter === 'assigned' && assigned) ||
+        (assignmentFilter === 'unassigned' && !assigned);
+      return matchesSearch && matchesStage && matchesAssignment;
     });
-  }, [candidates, searchTerm]);
+  }, [assignmentFilter, candidates, searchTerm, stageFilter]);
+
+  const hasActiveFilters =
+    Boolean(searchTerm.trim()) || stageFilter !== 'all' || assignmentFilter !== 'all';
+
+  const resetFilters = useCallback(() => {
+    setSearchTerm('');
+    setStageFilter('all');
+    setAssignmentFilter('all');
+  }, []);
 
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Admin') {
@@ -133,14 +157,88 @@ const CandidatesPage = () => {
             />
           </div>
         </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="space-y-2">
+            <Label
+              htmlFor="candidate-stage-filter"
+              className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+            >
+              Stage
+            </Label>
+            <select
+              id="candidate-stage-filter"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              value={stageFilter}
+              onChange={(event) => setStageFilter(event.target.value)}
+            >
+              <option value="all">All stages</option>
+              {stageOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label
+              htmlFor="candidate-assignment-filter"
+              className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+            >
+              Assignment
+            </Label>
+            <select
+              id="candidate-assignment-filter"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              value={assignmentFilter}
+              onChange={(event) => setAssignmentFilter(event.target.value)}
+            >
+              <option value="all">All</option>
+              <option value="assigned">Assigned</option>
+              <option value="unassigned">Unassigned</option>
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+              Active filters
+            </Label>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {hasActiveFilters ? null : <span className="text-muted-foreground">None</span>}
+              {stageFilter !== 'all' ? (
+                <Badge variant="outline" className="text-xs">
+                  Stage: {stageLabels[stageFilter]}
+                </Badge>
+              ) : null}
+              {assignmentFilter !== 'all' ? (
+                <Badge variant="outline" className="text-xs">
+                  {assignmentFilter === 'assigned' ? 'Assigned only' : 'Unassigned only'}
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        {hasActiveFilters ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+            <span>
+              {filteredCandidates.length} candidate{filteredCandidates.length === 1 ? '' : 's'} match the current filters.
+            </span>
+            <Button type="button" variant="ghost" size="xs" onClick={resetFilters}>
+              Clear filters
+            </Button>
+          </div>
+        ) : null}
 
         {isLoading ? (
           <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
             Loading candidates...
           </div>
         ) : filteredCandidates.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-            No candidates matched your filters.
+          <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground space-y-3">
+            <p>No candidates matched your filters.</p>
+            {hasActiveFilters ? (
+              <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
+                Reset filters
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border bg-card/70">

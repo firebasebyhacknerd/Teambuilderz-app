@@ -26,6 +26,7 @@ import {
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import EmptyState from '../../components/ui/empty-state';
 import {
   useAdminOverviewQuery,
   useAdminActivityQuery,
@@ -34,8 +35,11 @@ import {
 } from '../../lib/queryHooks';
 import API_URL from '../../lib/api';
 import { formatLabel } from '../../lib/formatting';
+import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../../lib/refreshBus';
 
 const numberFormatter = new Intl.NumberFormat();
+const decimalFormatter = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const percentFormatter = new Intl.NumberFormat(undefined, { style: 'percent', minimumFractionDigits: 0 });
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
@@ -118,6 +122,16 @@ const AdminDashboard = () => {
   const { data: notifications, isLoading: notificationsLoading } = useNotificationsQuery(token, Boolean(token));
   const { data: userActivity, isLoading: userActivityLoading } = useUserActivityQuery(token, Boolean(token));
 
+  const handleExternalDashboardRefresh = useCallback(() => {
+    if (!token) {
+      return;
+    }
+    refetchOverview();
+    refetchActivity();
+  }, [refetchActivity, refetchOverview, token]);
+
+  useRefreshListener(REFRESH_CHANNELS.DASHBOARD, handleExternalDashboardRefresh);
+
   const summary = overview?.summary ?? {
     totalCandidates: 0,
     activeCandidates: 0,
@@ -132,7 +146,34 @@ const AdminDashboard = () => {
       approved: 0,
       pending: 0,
     },
+    avgApplicationsPerDay: 0,
+    avgApplicationsPerRecruiterPerDay: 0,
   };
+
+  const activityTrendPoints = useMemo(
+    () =>
+      (overview?.activityTrend ?? []).map((point) => ({
+        date: point.date,
+        applications: Number(point.applications) || 0,
+        interviews: Number(point.interviews) || 0,
+        assessments: Number(point.assessments) || 0,
+      })),
+    [overview?.activityTrend],
+  );
+  const trendWindowLabel = activityTrendPoints.length > 1 ? `${activityTrendPoints.length}-day trend` : null;
+  const applicationsTrend = useMemo(
+    () => activityTrendPoints.map((point) => point.applications),
+    [activityTrendPoints],
+  );
+  const interviewsTrend = useMemo(
+    () => activityTrendPoints.map((point) => point.interviews),
+    [activityTrendPoints],
+  );
+  const assessmentsTrend = useMemo(
+    () => activityTrendPoints.map((point) => point.assessments),
+    [activityTrendPoints],
+  );
+
   const applicationsTodayBreakdown = summary.applicationsTodayBreakdown ?? {
     total: 0,
     approved: 0,
@@ -455,6 +496,8 @@ const applicationsTodayDetails = (
       }
 
       await Promise.all([refetchActivity(), refetchOverview()]);
+      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
+      emitRefresh(REFRESH_CHANNELS.PERFORMANCE);
     } catch (error) {
       console.error('Approval action failed:', error);
     } finally {
@@ -519,6 +562,8 @@ const applicationsTodayDetails = (
         throw new Error(message || 'Bulk action failed.');
       }
       await Promise.all([refetchActivity(), refetchOverview()]);
+      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
+      emitRefresh(REFRESH_CHANNELS.PERFORMANCE);
       clearAllSelections();
     } catch (error) {
       console.error('Bulk approval action failed:', error);
@@ -606,16 +651,7 @@ const applicationsTodayDetails = (
     [pendingRecruiterId, refetchActivity, refetchOverview, selectedApprovals, token],
   );
 
-  const sidebarLinks = [
-    { href: '/admin', label: 'Dashboard', icon: Home },
-    { href: '/admin/candidates', label: 'Candidates', icon: Users },
-    { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
-    { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-    { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-    { href: '/profile', label: 'My Profile', icon: CircleUser },
-  ];
+  const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
 
   if (isLoading) {
     return (
@@ -659,7 +695,7 @@ const applicationsTodayDetails = (
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-4 mb-8">
         <KpiCard
           icon={<Users className="h-5 w-5 text-primary" />}
           title="Candidate roster"
@@ -681,6 +717,14 @@ const applicationsTodayDetails = (
           onAction={() => router.push('/admin/recruiters')}
         />
         <KpiCard
+          icon={<TrendingUp className="h-5 w-5 text-orange-600" />}
+          title="Avg applications / day"
+          value={summary.avgApplicationsPerDay}
+          accent="bg-orange-100 text-orange-700"
+          details={`${numberFormatter.format(summary.totalApplicationsToday || 0)} total this ${rangeConfig.label}`}
+          valueFormatter={decimalFormatter}
+        />
+        <KpiCard
           icon={<BarChart3 className="h-5 w-5 text-blue-600" />}
           title="Applications awaiting approval"
           value={pendingCounts.applications}
@@ -693,6 +737,9 @@ const applicationsTodayDetails = (
           actionLabel="Review applications"
           onAction={() => focusPendingApprovals('applications')}
           actionDisabled={pendingCounts.applications === 0}
+          trendData={applicationsTrend}
+          trendLabel={trendWindowLabel}
+          trendColor="text-blue-600"
         />
         <KpiCard
           icon={<Target className="h-5 w-5 text-pink-600" />}
@@ -707,6 +754,9 @@ const applicationsTodayDetails = (
           actionLabel="Review interviews"
           onAction={() => focusPendingApprovals('interviews')}
           actionDisabled={pendingCounts.interviews === 0}
+          trendData={interviewsTrend}
+          trendLabel={trendWindowLabel}
+          trendColor="text-pink-600"
         />
         <KpiCard
           icon={<ClipboardList className="h-5 w-5 text-purple-600" />}
@@ -721,6 +771,9 @@ const applicationsTodayDetails = (
           actionLabel="Review assessments"
           onAction={() => focusPendingApprovals('assessments')}
           actionDisabled={pendingCounts.assessments === 0}
+          trendData={assessmentsTrend}
+          trendLabel={trendWindowLabel}
+          trendColor="text-purple-600"
         />
       </div>
 
@@ -767,7 +820,17 @@ const applicationsTodayDetails = (
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {candidateStages.length === 0 ? (
-              <p className="text-sm text-muted-foreground col-span-2">No candidate pipeline data available.</p>
+              <EmptyState
+                className="col-span-2"
+                icon={PieChart}
+                title="No pipeline data"
+                description="Add or import candidates to visualize stage distribution."
+                action={
+                  <Button type="button" size="sm" onClick={() => router.push('/admin/candidates')}>
+                    Go to candidates
+                  </Button>
+                }
+              />
             ) : (
               candidateStages.map((stage) => (
                 <StageChip key={stage.stage} label={stage.stage} count={stage.count} total={summary.totalCandidates || 1} />
@@ -804,7 +867,11 @@ const applicationsTodayDetails = (
         </div>
         <div className="divide-y divide-border">
           {recruiterProductivity.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">No recruiter productivity data found.</p>
+            <EmptyState
+              icon={TrendingUp}
+              title="No productivity data yet"
+              description="As recruiters start logging activity, their application and interview contributions will appear here."
+            />
           ) : (
             recruiterProductivity.map((recruiter) => (
               <RecruiterListItem
@@ -834,7 +901,11 @@ const applicationsTodayDetails = (
             </div>
           </div>
           {usersWithStatus.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No users found.</p>
+            <EmptyState
+              icon={Users}
+              title="No team members online"
+              description="Invite recruiters or ensure accounts are active to see presence data."
+            />
           ) : (
             <div className="space-y-2">
               {usersWithStatus.slice(0, 10).map((user) => (
@@ -869,7 +940,11 @@ const applicationsTodayDetails = (
             />
           </div>
           {notesByRecruiter.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recruiter note activity recorded yet.</p>
+            <EmptyState
+              icon={ClipboardList}
+              title="No note activity"
+              description="Encourage recruiters to log notes after every touchpoint."
+            />
           ) : (
             <div className="divide-y divide-border rounded-lg border border-border bg-card/50">
               {notesByRecruiter.map((summary) => (
@@ -887,7 +962,11 @@ const applicationsTodayDetails = (
             Recent Collaboration
           </h3>
           {recentNotes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recent notes logged.</p>
+            <EmptyState
+              icon={MessageSquare}
+              title="No recent notes"
+              description="Newly logged notes will appear here for quick review."
+            />
           ) : (
             <div className="space-y-3">
               {recentNotes.map((note) => (
@@ -903,7 +982,11 @@ const applicationsTodayDetails = (
             Upcoming Reminders
           </h3>
           {upcomingReminders.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active reminders scheduled.</p>
+            <EmptyState
+              icon={CalendarClock}
+              title="Nothing scheduled"
+              description="Set reminders on candidates or notes to keep the team on track."
+            />
           ) : (
             <div className="space-y-3">
               {upcomingReminders.map((reminder) => (
@@ -922,7 +1005,11 @@ const applicationsTodayDetails = (
             Detailed log of recruiter-authored notes for performance reviews.
           </p>
           {recruiterNotes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recruiter notes logged yet.</p>
+            <EmptyState
+              icon={ClipboardList}
+              title="No notes logged"
+              description="Once recruiters add notes, they will stream into this feed."
+            />
           ) : (
             <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
               {recruiterNotes.slice(0, 20).map((note) => (
@@ -942,7 +1029,11 @@ const applicationsTodayDetails = (
           <div>
             <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Reminders</h4>
             {centerReminders.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending reminders.</p>
+              <EmptyState
+                icon={CalendarClock}
+                title="No reminders"
+                description="You're caught up on reminders right now."
+              />
             ) : (
               <div className="space-y-2">
                 {centerReminders.map((reminder) => (
@@ -954,7 +1045,11 @@ const applicationsTodayDetails = (
           <div>
             <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Alerts</h4>
             {centerAlerts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">All clear! No open alerts.</p>
+              <EmptyState
+                icon={AlertTriangle}
+                title="All clear"
+                description="No alerts require attention."
+              />
             ) : (
               <div className="space-y-2">
                 {centerAlerts.map((alert) => (
@@ -1251,11 +1346,24 @@ const PendingApprovalsCard = ({
           ) : null}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {filterValue === 'all'
-            ? 'All clear\u2014no pending approvals for this range.'
-            : 'No pending approvals for the selected recruiter in this range.'}
-        </p>
+        <EmptyState
+          icon={ClipboardList}
+          title="No pending approvals"
+          description={
+            filterValue === 'all'
+              ? 'All submissions have been reviewed for this range.'
+              : 'No pending approvals for the selected recruiter.'
+          }
+          action={
+            filterValue !== 'all' && onFilterChange
+              ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => onFilterChange('all')}>
+                  Show all recruiters
+                </Button>
+              )
+              : null
+          }
+        />
       )}
     </Card>
   );
@@ -1276,9 +1384,11 @@ const RecentApprovalsCard = ({ approvals, dateTimeFormatter }) => {
         <h3 className="text-lg font-semibold text-foreground">Recent Approval Decisions</h3>
       </div>
       {recent.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No approval activity recorded for this range.
-        </p>
+        <EmptyState
+          icon={CheckCircle}
+          title="No recent approvals"
+          description="New approvals and rejections will appear here as they happen."
+        />
       ) : (
         <div className="space-y-3">
           {recent.slice(0, 12).map((item) => {
@@ -1428,16 +1538,35 @@ const ApprovalRow = ({
   </div>
 );
 
-const KpiCard = ({ icon, title, value, accent, details, actionLabel, onAction, actionDisabled }) => (
+const KpiCard = ({
+  icon,
+  title,
+  value,
+  accent,
+  details,
+  actionLabel,
+  onAction,
+  actionDisabled,
+  trendData,
+  trendLabel,
+  trendColor = 'text-primary',
+  valueFormatter = numberFormatter,
+}) => (
   <Card className="flex flex-col gap-4 p-5">
     <div className="flex items-center gap-3">
       <div className={`h-11 w-11 rounded-full flex items-center justify-center ${accent}`}>{icon}</div>
-      <div>
+      <div className="flex-1">
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
-        <p className="text-2xl font-semibold text-foreground">{numberFormatter.format(value ?? 0)}</p>
+        <p className="text-2xl font-semibold text-foreground">{valueFormatter.format(value ?? 0)}</p>
         {details ? <div className="mt-1 text-xs text-muted-foreground">{details}</div> : null}
       </div>
     </div>
+    {Array.isArray(trendData) && trendData.length > 1 ? (
+      <div className="mt-2">
+        <MiniSparkline data={trendData} colorClass={trendColor} />
+        {trendLabel ? <p className="mt-1 text-[10px] text-muted-foreground text-right">{trendLabel}</p> : null}
+      </div>
+    ) : null}
     {actionLabel && onAction ? (
       <Button
         type="button"
@@ -1453,6 +1582,32 @@ const KpiCard = ({ icon, title, value, accent, details, actionLabel, onAction, a
     ) : null}
   </Card>
 );
+
+const MiniSparkline = ({ data, colorClass = 'text-primary' }) => {
+  if (!Array.isArray(data) || data.length === 0) {
+    return null;
+  }
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const coordinates = data.map((value, index) => {
+    const x = data.length === 1 ? 0 : (index / (data.length - 1)) * 100;
+    const y = 100 - ((value - min) / range) * 100;
+    return `${x},${y}`;
+  });
+  return (
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none" className={`h-12 w-full ${colorClass}`}>
+      <polyline
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={coordinates.join(' ')}
+      />
+    </svg>
+  );
+};
 
 const StageChip = ({ label, count, total }) => {
   const stageLabel = label

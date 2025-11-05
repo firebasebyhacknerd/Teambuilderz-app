@@ -1,18 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Users,
-  Home,
-  FileText,
-  AlertTriangle,
   LogOut,
   UserCheck,
   Trash2,
   Save,
   Plus,
-  TrendingUp,
-  BarChart3,
-  CircleUser,
 } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
@@ -37,6 +31,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from '../../components/ui/dialog';
+import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
 
 const AdminRecruitersPage = () => {
   const router = useRouter();
@@ -60,7 +55,9 @@ const AdminRecruitersPage = () => {
     isActive: true,
     password: '',
   });
-  const [createForm, setCreateForm] = useState(() => createFormInitial());
+const [createForm, setCreateForm] = useState(() => createFormInitial());
+  const [filterSearch, setFilterSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -82,10 +79,34 @@ const AdminRecruitersPage = () => {
 
   const { data: users = [], isLoading } = useUsersQuery(token, Boolean(token));
 
-  const recruiters = useMemo(
-    () => users.filter((user) => user.role === 'Recruiter'),
-    [users]
-  );
+const recruiters = useMemo(
+  () => users.filter((user) => user.role === 'Recruiter'),
+  [users]
+);
+
+  const filteredRecruiters = useMemo(() => {
+    if (!recruiters.length) {
+      return [];
+    }
+    const term = filterSearch.trim().toLowerCase();
+    return recruiters.filter((recruiter) => {
+      const isActive = recruiter.is_active ?? recruiter.isActive ?? true;
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'active' && isActive) ||
+        (statusFilter === 'inactive' && !isActive);
+      const matchesSearch =
+        !term ||
+        (recruiter.name || '').toLowerCase().includes(term) ||
+        (recruiter.email || '').toLowerCase().includes(term);
+      return matchesStatus && matchesSearch;
+    });
+  }, [filterSearch, recruiters, statusFilter]);
+
+  const resetFilters = useCallback(() => {
+    setFilterSearch('');
+    setStatusFilter('all');
+  }, []);
 
   useEffect(() => {
     if (!selectedUserId) {
@@ -241,19 +262,12 @@ const AdminRecruitersPage = () => {
     router.push('/login');
   };
 
-  const sidebarLinks = [
-    { href: '/admin', label: 'Dashboard', icon: Home },
-    { href: '/admin/candidates', label: 'Candidates', icon: Users },
-    { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
-    { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-    { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-    { href: '/profile', label: 'My Profile', icon: CircleUser },
-  ];
+const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
 
-  const isMutating = updateUser.isPending || deleteUser.isPending;
-  const isCreateMutating = createUser.isPending;
+const isMutating = updateUser.isPending || deleteUser.isPending;
+const isCreateMutating = createUser.isPending;
+  const hasActiveFilters = Boolean(filterSearch.trim()) || statusFilter !== 'all';
+  const visibleRecruiters = filteredRecruiters;
 
   if (!token) {
     return null;
@@ -289,27 +303,82 @@ const AdminRecruitersPage = () => {
                   Recruiter Roster
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  {recruiters.length} recruiters in the organisation.
+                  Showing {visibleRecruiters.length} of {recruiters.length} recruiters
+                  {hasActiveFilters ? ' (filters applied).' : '.'}
                 </p>
               </div>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline" className="gap-2">
-                  <Plus className="h-4 w-4" />
-                  Add Recruiter
-                </Button>
-              </DialogTrigger>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-2">
+                <Plus className="h-4 w-4" />
+                Add Recruiter
+              </Button>
+            </DialogTrigger>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label
+                htmlFor="recruiter-filter-search"
+                className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+              >
+                Search team
+              </Label>
+              <Input
+                id="recruiter-filter-search"
+                value={filterSearch}
+                onChange={(event) => setFilterSearch(event.target.value)}
+                placeholder="Search by name or email"
+              />
             </div>
-            {isLoading ? (
-              <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
-                Loading team data...
-              </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="recruiter-filter-status"
+                className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+              >
+                Status
+              </Label>
+              <select
+                id="recruiter-filter-status"
+                className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+              >
+                <option value="all">All recruiters</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </div>
+          </div>
+          {hasActiveFilters ? (
+            <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+              <span>
+                Filters applied:
+                {filterSearch ? ` search "${filterSearch}"` : ''}
+                {filterSearch && statusFilter !== 'all' ? ' ·' : ''}
+                {statusFilter !== 'all' ? ` status ${statusFilter}` : ''}
+              </span>
+              <Button type="button" variant="ghost" size="xs" onClick={resetFilters}>
+                Clear
+              </Button>
+            </div>
+          ) : null}
+          {isLoading ? (
+            <div className="h-32 flex items-center justify-center text-sm text-muted-foreground">
+              Loading team data...
+            </div>
             ) : recruiters.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No recruiters yet. Use &quot;Add Recruiter&quot; to invite a teammate.
               </p>
+            ) : visibleRecruiters.length === 0 ? (
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>No recruiters match the current filters.</p>
+                <Button type="button" variant="link" size="sm" className="px-0" onClick={resetFilters}>
+                  Reset filters
+                </Button>
+              </div>
             ) : (
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-                {recruiters.map((recruiter) => {
+                {visibleRecruiters.map((recruiter) => {
                   const isSelected = recruiter.id === selectedUserId;
                   const quota = recruiter.daily_quota ?? recruiter.dailyQuota ?? 0;
                   const statusTone = (recruiter.is_active ?? true)

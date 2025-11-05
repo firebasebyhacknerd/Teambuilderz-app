@@ -5,8 +5,8 @@ $env:DB_PASSWORD="teambuilderz_password"
 $env:DB_NAME="teambuilderz"
 $env:DB_HOST="localhost"
 $env:DB_PORT="5432"
-$env:ADMIN_PASSWORD="admin123"
-$env:RECRUITER_PASSWORD="recruit123"
+# Optional: set ADMIN_EMAIL/ADMIN_PASSWORD or RECRUITER_EMAIL/RECRUITER_PASSWORD before running
+# if you want the backend to seed initial users automatically.
 
 Write-Host "Starting TeamBuilderz Backend Server..."
 Write-Host "Environment variables set successfully!"

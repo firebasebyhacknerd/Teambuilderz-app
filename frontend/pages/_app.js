@@ -5,6 +5,7 @@ import { useRouter } from 'next/router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { configureAnalytics, flushAnalytics, track } from '../lib/analytics';
 import API_URL from '../lib/api';
+import { ThemeProvider } from '../lib/theme';
 
 function MyApp({ Component, pageProps }) {
   const [queryClient] = useState(
@@ -92,7 +93,9 @@ function MyApp({ Component, pageProps }) {
         <link rel="icon" href="/favicon.ico" />
       </Head>
       <QueryClientProvider client={queryClient}>
-        <Component {...pageProps} />
+        <ThemeProvider>
+          <Component {...pageProps} />
+        </ThemeProvider>
       </QueryClientProvider>
     </>
   );

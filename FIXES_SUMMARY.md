@@ -79,7 +79,7 @@
 4. **Access the App:**
    - Frontend: http://localhost:3000
    - Backend: http://localhost:3001
-   - Login: admin@tbz.us / admin123
+   - Login: configure your own admin credentials before first sign-in
 
 ## ✅ All Systems Working
 

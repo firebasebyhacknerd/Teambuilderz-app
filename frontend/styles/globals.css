@@ -9,6 +9,21 @@
 
     --surface: 32 36% 92%;
 
+    /* spacing scale */
+    --space-2xs: 0.25rem;
+    --space-xs: 0.5rem;
+    --space-sm: 0.75rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+
+    /* typography scale */
+    --font-size-xs: 0.75rem;
+    --font-size-sm: 0.875rem;
+    --font-size-base: 1rem;
+    --font-size-lg: 1.125rem;
+    --font-size-xl: 1.25rem;
+
     --muted: 30 30% 90%;
     --muted-foreground: 215 18% 38%;
 
@@ -82,6 +97,30 @@
     @apply bg-background text-foreground;
     font-family: var(--font-body);
     background-color: hsl(var(--background));
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 2px;
+  }
+
+  .skip-link {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: var(--space-xs) var(--space-md);
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md, 0 10px 30px rgba(0, 0, 0, 0.15));
+    z-index: 999;
+    top: -100px;
+    transition: top 0.2s ease;
+  }
+
+  .skip-link:focus-visible {
+    top: var(--space-sm);
   }
 
   h1,

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import { useCallback } from 'react';
 import { AlertTriangle, CircleUser, FileText, Home, Target, TrendingUp, Users } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../../components/ui/card';
@@ -8,6 +9,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { track } from '../../lib/analytics';
 import API_URL from '../../lib/api';
+import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../../lib/refreshBus';
 
 const initialFormState = {
   name: '',
@@ -40,42 +42,46 @@ export default function ProfilePage() {
     setUserRole(storedRole ?? 'Recruiter');
   }, [router]);
 
+  const fetchProfile = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      setLoading(true);
+      setError('');
+      const response = await fetch(`${API_URL}/api/v1/profile`, {
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          router.push('/login');
+          return;
+        }
+        throw new Error('Unable to load profile information.');
+      }
+
+      const data = await response.json();
+      setProfile(data);
+      setForm((prev) => ({
+        ...prev,
+        name: data.name ?? '',
+        email: data.email ?? '',
+      }));
+      track('profile_view', { role: data.role });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [router, token]);
+
   useEffect(() => {
     if (!token) return;
-
-    const fetchProfile = async () => {
-      try {
-        setLoading(true);
-        setError('');
-        const response = await fetch(`${API_URL}/api/v1/profile`, {
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          if (response.status === 401) {
-            router.push('/login');
-            return;
-          }
-          throw new Error('Unable to load profile information.');
-        }
-
-        const data = await response.json();
-        setProfile(data);
-        setForm((prev) => ({
-          ...prev,
-          name: data.name ?? '',
-          email: data.email ?? '',
-        }));
-        track('profile_view', { role: data.role });
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchProfile();
-  }, [router, token]);
+  }, [fetchProfile, token]);
+
+  useRefreshListener(REFRESH_CHANNELS.PROFILE, fetchProfile);
 
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Admin') {
@@ -158,6 +164,8 @@ export default function ProfilePage() {
       }));
       track('profile_update_success', { emailChanged: profile?.email !== updated.email });
       setSuccess('Profile updated successfully.');
+      emitRefresh(REFRESH_CHANNELS.PROFILE);
+      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
     } catch (err) {
       setError(err.message);
       track('profile_update_error', { message: err.message });

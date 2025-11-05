@@ -40,6 +40,7 @@ export const queryKeys = {
   interviews: (token, params) => ['interviews', token, params ? JSON.stringify(params) : null],
   assessments: (token, params) => ['assessments', token, params ? JSON.stringify(params) : null],
   recruiterProfile: (token, userId, paramsKey) => ['recruiter-profile', token, userId, paramsKey ?? null],
+  attendance: (token, paramsKey) => ['attendance', token, paramsKey ?? null],
 };
 
 export const useApplicationsQuery = (token, enabled = true) =>
@@ -107,6 +108,22 @@ export const useAssessmentsQuery = (token, params = {}, enabled = true) =>
     enabled: Boolean(token) && enabled,
     placeholderData: [],
   });
+
+export const useAttendanceQuery = (token, params = {}, enabled = true) => {
+  const paramsKey = JSON.stringify(params ?? {});
+  return useQuery({
+    queryKey: queryKeys.attendance(token, paramsKey),
+    queryFn: async () => {
+      const query = buildSearchParams(params);
+      const response = await fetch(`${API_URL}/api/v1/attendance${query}`, {
+        headers: buildHeaders(token),
+      });
+      return handleResponse(response, 'Unable to load attendance.');
+    },
+    enabled: Boolean(token) && enabled,
+    retry: false,
+  });
+};
 
 export const useCreateInterviewMutation = (token, options = {}) => {
   const queryClient = useQueryClient();
@@ -704,6 +721,54 @@ export const useDeleteUserMutation = (token, options = {}) => {
     onSuccess: (...args) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.users(token) });
       queryClient.invalidateQueries({ queryKey: queryKeys.userActivity(token) });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useSubmitAttendanceMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await fetch(`${API_URL}/api/v1/attendance`, {
+        method: 'POST',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to submit attendance.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'attendance',
+      });
+      if (options?.onSuccess) {
+        options.onSuccess(...args);
+      }
+    },
+    ...options,
+  });
+};
+
+export const useUpdateAttendanceMutation = (token, options = {}) => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ attendanceId, payload }) => {
+      const response = await fetch(`${API_URL}/api/v1/attendance/${attendanceId}`, {
+        method: 'PUT',
+        headers: buildHeaders(token),
+        body: JSON.stringify(payload),
+      });
+      return handleResponse(response, 'Unable to update attendance.');
+    },
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({
+        predicate: ({ queryKey }) => Array.isArray(queryKey) && queryKey[0] === 'attendance',
+      });
       if (options?.onSuccess) {
         options.onSuccess(...args);
       }

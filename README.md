@@ -72,6 +72,27 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
      ```env
      NEXT_PUBLIC_API_URL=http://localhost:3001
      ```
+   - Optional security/env hardening toggles:
+     ```env
+     ENFORCE_TLS=true                 # Redirect HTTP → HTTPS (requires proxy that sets X-Forwarded-Proto)
+     COOKIE_SECURE=true               # Force secure cookies even outside NODE_ENV=production
+     COOKIE_SAMESITE=strict           # Adjust SameSite policy if embedding in iframes
+     SECRETS_FILE=./secrets/local.json# JSON file with key/value overrides (kept out of version control)
+     AUDIT_LOG_PATH=logs/audit.log    # Local file to mirror audit events
+     AUDIT_WEBHOOK_URL=https://hooks.slack.com/...  # Optional webhook for audit streaming
+     AUDIT_CW_LOG_GROUP=teambuilderz/audit          # CloudWatch Logs group (optional)
+     AUDIT_CW_LOG_STREAM=backend                    # CloudWatch stream to append to
+     AUDIT_CW_REGION=us-east-1                      # Region for CloudWatch logs
+     AUDIT_CW_ACCESS_KEY=...                        # Optional explicit AWS creds (otherwise use IAM role/env)
+     AUDIT_CW_SECRET_KEY=...
+     AUDIT_CW_SESSION_TOKEN=...
+     ```
+     Values defined in `SECRETS_FILE` take precedence over process env vars, making it easy to source secrets
+     from Docker/K8s secret mounts without polluting `.env`.
+
+     When `AUDIT_CW_*` variables are supplied, every `audit_logs` INSERT is mirrored to CloudWatch Logs (and still
+     written locally/webhook if those sinks are configured). This creates a tamper-resistant history of approvals,
+     rejections, and user changes that SecOps can monitor centrally.
 
 5. **Run the backend**
    ```bash
@@ -89,8 +110,7 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
    ```
 
 7. **Log in with default credentials**
-   - Admin: `admin@tbz.us / admin123`
-   - Recruiter: `sarthi@tbz.us / recruit123`
+   - Define secure admin/recruiter accounts via environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.) or invite users through the Admin → Team Management page after deployment.
 
 ---
 
@@ -145,6 +165,114 @@ npm run dev --prefix frontend
 # Browser
 open http://localhost:3000  # or: start http://localhost:3000 (Windows)
 ```
+
+## Docker Compose & Auto-start
+
+The repository ships with `docker-compose.yml` so you can run PostgreSQL, the API, and the frontend with one command:
+
+```bash
+# First time: ensure secrets/backend.local.json has your credentials.
+docker compose up -d      # start everything (Postgres, backend, frontend)
+docker compose down       # stop and remove the containers
+```
+
+Need HTTPS? Add `tbz_proxy` and point your browser to `https://localhost`:
+
+```bash
+docker compose up -d tbz_postgres tbz_backend tbz_frontend tbz_proxy
+```
+
+All services use `restart: unless-stopped`, so once Docker Desktop is running they will automatically resume.
+
+On Windows you can fully automate container start-up with:
+
+1. **Enable Docker Desktop auto-start**  
+   Settings → General → ✅ *Start Docker Desktop when you log in*.
+2. **Register a scheduled task that runs `docker compose up -d` after you sign in**  
+   Open an elevated PowerShell prompt in the repo root and run:
+   ```powershell
+   $task = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"cd `"$PWD`"; docker compose up -d`""
+   Register-ScheduledTask -TaskName "TeamBuilderz Auto Start" -Action $task -Trigger (New-ScheduledTaskTrigger -AtLogOn) -RunLevel Highest
+   ```
+   The next time you log in, Docker Desktop will boot and the scheduled task will bring the stack up without manual clicks.
+
+## Bulk recruiter application import
+
+Historical recruiter/candidate submission totals can be backfilled via `backend/scripts/import_application_activity.js`. The script normalises names (case-insensitive), upserts the `recruiter_candidate_activity` table, and mirrors totals into the `applications` + `daily_activity` tables. To run it against the containers:
+
+```bash
+docker compose exec tbz_backend node scripts/import_application_activity.js
+```
+
+The job reads database credentials from `backend/.env`, so ensure that file matches the credentials defined in `docker-compose.yml` (it already defaults to the correct values for local Docker).
+
+## Managing secrets with `SECRETS_FILE`
+
+The backend now prefers loading credentials from a JSON blob pointed to by `SECRETS_FILE`. The compose file mounts `secrets/backend.local.json` into the container at `/run/secrets/tbz-backend.json` so nothing sensitive lives in the `.env` committed to Git.
+
+1. Copy `secrets/backend.local.json` (already checked in with placeholders) or replace it with your own file:
+   ```json
+   {
+     "DB_USER": "teambuilderz_user",
+     "DB_PASSWORD": "super-secret",
+     "DB_NAME": "teambuilderz",
+     "JWT_SECRET": "change-me",
+     "ADMIN_PASSWORD": "<set-your-admin-password>",
+     "RECRUITER_PASSWORD": "<set-your-recruiter-password>"
+   }
+   ```
+2. Ensure `docker-compose.yml` mounts it (already configured) and keep it out of version control if you add additional env files.
+3. When deploying to Kubernetes/Swarm, mount the secret JSON to `/run/secrets/tbz-backend.json` and set `SECRETS_FILE` accordingly.
+
+Environment variables still work, but `SECRETS_FILE` takes precedence so you can safely inject credentials through Docker/K8s secrets without editing `.env`.
+
+## HTTPS reverse proxy (nginx)
+
+The compose stack includes an optional `tbz_proxy` service (nginx) that terminates TLS, forwards `/api/*` to the backend, and everything else to the Next.js app. Steps:
+
+1. Generate a dev certificate (for localhost):
+   ```bash
+   mkdir -p certs
+   openssl req -x509 -newkey rsa:4096 -sha256 -days 825 \
+     -nodes -keyout certs/dev.key -out certs/dev.crt \
+     -subj "/CN=localhost"
+   ```
+   (macOS users can also run `mkcert localhost` and copy the files into `certs/`.)
+2. Start the stack with the proxy:
+   ```bash
+   docker compose up -d tbz_postgres tbz_backend tbz_frontend tbz_proxy
+   ```
+3. Browse to `https://localhost` – nginx forwards `/api` calls to `tbz_backend:3001`, sets `X-Forwarded-Proto: https`, and the backend enforces TLS thanks to `ENFORCE_TLS=true`.
+
+If you already have an external load balancer, reuse the nginx config under `ops/reverse-proxy/nginx.conf` as a template (ensure it forwards `X-Forwarded-Proto` and `X-Forwarded-For`).
+When you serve the frontend through the proxy, build it with `NEXT_PUBLIC_API_URL=https://localhost/api` so browser calls align with the TLS endpoint.
+
+## Audit logging & monitoring
+
+Every create/update/delete event already lands in the `audit_logs` table. The new audit streaming layer mirrors those rows to stdout, optional log files, Slack/webhooks, and AWS CloudWatch Logs:
+
+1. Create the CloudWatch group/stream once:
+   ```bash
+   aws logs create-log-group --log-group-name teambuilderz/audit
+   aws logs create-log-stream --log-group-name teambuilderz/audit --log-stream-name backend
+   ```
+2. Populate the `AUDIT_CW_*` variables (or grant the container an IAM role with permissions). The backend will call `PutLogEvents` for every audit row.
+3. (Optional) Add a metric filter / alarm to alert on high-risk events:
+   ```bash
+   aws logs put-metric-filter \
+     --log-group-name teambuilderz/audit \
+     --filter-name audit-rejects \
+     --filter-pattern '"submission_rejected"' \
+     --metric-transformations \
+       metricName=AuditRejects,metricNamespace=TeamBuilderz,metricValue=1
+   aws cloudwatch put-metric-alarm --alarm-name "High approval rejects" \
+     --metric-name AuditRejects --namespace TeamBuilderz \
+     --statistic Sum --period 300 --threshold 5 \
+     --comparison-operator GreaterThanThreshold --evaluation-periods 1 \
+     --alarm-actions <sns-topic-arn>
+   ```
+
+This pairing (database + CloudWatch) gives SecOps a tamper-resistant stream they can query in Athena or wire into dashboards.
 
 ### 6. Building for Production
 

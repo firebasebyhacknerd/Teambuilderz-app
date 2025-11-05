@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { LogIn, User, Lock, Eye, EyeOff } from 'lucide-react';
 import {
@@ -12,13 +12,14 @@ import {
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { ThemeSelect } from '../components/ui/theme-toggle';
 import API_URL from '../lib/api';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('admin@tbz.us');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -163,7 +164,10 @@ const LoginPage = () => {
 
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--surface))] to-[hsl(var(--background))] p-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--surface))] to-[hsl(var(--background))] p-4">
+      <div className="absolute right-4 top-4">
+        <ThemeSelect hideLabel compact />
+      </div>
       <Card className="w-full max-w-md shadow-lg backdrop-blur-sm border border-border/70">
         <CardHeader className="text-center space-y-3">
           <div className="mx-auto w-16 h-16 rounded-xl bg-secondary/70 flex items-center justify-center ring-2 ring-primary/15">
@@ -192,6 +196,7 @@ const LoginPage = () => {
                       }
                     }}
                     onBlur={handleEmailBlur}
+                    placeholder="you@company.com"
                     aria-invalid={Boolean(fieldErrors.email)}
                     aria-describedby={fieldErrors.email ? 'email-error' : undefined}
                     className={`pl-9 ${fieldErrors.email ? 'border-red-500 focus-visible:ring-red-500 focus-visible:ring-offset-0' : ''}`}
@@ -222,6 +227,7 @@ const LoginPage = () => {
                     }}
                     onBlur={handlePasswordBlur}
                     onKeyUp={handlePasswordKeyUp}
+                    placeholder="Enter your password"
                     aria-invalid={Boolean(fieldErrors.password)}
                     aria-describedby={passwordHelpIds || undefined}
                     className={`pl-9 pr-10 ${
@@ -275,10 +281,11 @@ const LoginPage = () => {
             )}
           </form>
         </CardContent>
-        <CardFooter className="flex flex-col text-xs text-muted-foreground space-y-1 text-center">
-          <span className="font-semibold text-gray-600">Test Credentials:</span>
-          <span>Admin: admin@tbz.us / admin123</span>
-          <span>Recruiter: sarthi@tbz.us / recruit123</span>
+        <CardFooter className="flex flex-col gap-2 text-center text-xs text-muted-foreground">
+          <p>Forgot your credentials? Reach out to your TeamBuilderz administrator for access.</p>
+          <p className="text-muted-foreground/80">
+            For security, shared testing logins are no longer displayed here.
+          </p>
         </CardFooter>
       </Card>
     </div>

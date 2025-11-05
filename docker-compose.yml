@@ -32,12 +32,14 @@ services:
       DB_PASSWORD: teambuilderz_password
       DB_NAME: teambuilderz
       JWT_SECRET: your_super_secret_jwt_key_here_change_in_production
-      ADMIN_PASSWORD: admin123
-      RECRUITER_PASSWORD: recruit123
-      CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000,http://tbz_frontend:3000,http://host.docker.internal:3000
+      CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000,http://tbz_frontend:3000,http://host.docker.internal:3000,https://localhost
+      ENFORCE_TLS: "true"
+      SECRETS_FILE: /run/secrets/tbz-backend.json
     depends_on:
       tbz_postgres:
         condition: service_healthy
+    volumes:
+      - ./secrets/backend.local.json:/run/secrets/tbz-backend.json:ro
 
   tbz_frontend:
     build:
@@ -51,6 +53,20 @@ services:
       - NODE_ENV=production
     depends_on:
       - tbz_backend
+
+  tbz_proxy:
+    image: nginx:1.27-alpine
+    container_name: tbz_proxy
+    restart: unless-stopped
+    depends_on:
+      - tbz_frontend
+      - tbz_backend
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./ops/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
     
 volumes:
   postgres_data:

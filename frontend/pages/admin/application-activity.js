@@ -1,19 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import {
-  AlertTriangle,
-  BarChart3,
-  CircleUser,
-  FileText,
-  Home,
-  LogOut,
-  TrendingUp,
-  UserCheck,
-  Users,
-} from 'lucide-react';
+import { BarChart3, LogOut, Users, UserCheck, ClipboardList } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Badge } from '../../components/ui/badge';
+import EmptyState from '../../components/ui/empty-state';
 import {
   useApplicationActivityReportQuery,
   useCandidatesQuery,
@@ -43,6 +38,8 @@ const ApplicationActivityPage = () => {
   const [range, setRange] = useState('30d');
   const [selectedRecruiter, setSelectedRecruiter] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [minApplications, setMinApplications] = useState('');
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -119,19 +116,7 @@ const ApplicationActivityPage = () => {
     [candidates],
   );
 
-  const sidebarLinks = useMemo(
-    () => [
-      { href: '/admin', label: 'Dashboard', icon: Home },
-      { href: '/admin/candidates', label: 'Candidates', icon: Users },
-      { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
-      { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-      { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
-      { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-      { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-      { href: '/profile', label: 'My Profile', icon: CircleUser },
-    ],
-    [],
-  );
+  const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
@@ -143,6 +128,8 @@ const ApplicationActivityPage = () => {
   const handleClearFilters = useCallback(() => {
     setSelectedRecruiter('');
     setSelectedCandidate('');
+    setSearchTerm('');
+    setMinApplications('');
   }, []);
 
   const totals = report?.totals ?? {
@@ -160,7 +147,23 @@ const ApplicationActivityPage = () => {
       null,
     ) ?? null;
 
-  const details = report?.records ?? [];
+  const filteredDetails = useMemo(() => {
+    const details = report?.records ?? [];
+    if (!details.length) {
+      return [];
+    }
+    const term = searchTerm.trim().toLowerCase();
+    const minCount = Number(minApplications);
+    const hasMin = !Number.isNaN(minCount) && minApplications !== '';
+    return details.filter((entry) => {
+      const recruiterName = entry?.recruiter?.name?.toLowerCase() ?? '';
+      const candidateName = entry?.candidate?.name?.toLowerCase() ?? '';
+      const matchesTerm = !term || recruiterName.includes(term) || candidateName.includes(term);
+      const count = Number(entry?.applicationsCount || 0);
+      const matchesMin = !hasMin || count >= minCount;
+      return matchesTerm && matchesMin;
+    });
+  }, [minApplications, report, searchTerm]);
   const generatedLabel = report?.generatedAt
     ? dateTimeFormatter.format(new Date(report.generatedAt))
     : '—';
@@ -246,6 +249,53 @@ const ApplicationActivityPage = () => {
         </div>
       </div>
 
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
+        <div className="space-y-2">
+          <Label htmlFor="activity-search" className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+            Quick search
+          </Label>
+          <Input
+            id="activity-search"
+            placeholder="Filter by recruiter or candidate name"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="activity-min" className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+            Minimum applications
+          </Label>
+          <Input
+            id="activity-min"
+            type="number"
+            min={0}
+            placeholder="e.g. 10"
+            value={minApplications}
+            onChange={(event) => setMinApplications(event.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+            Active filters
+          </Label>
+          <div className="flex flex-wrap items-center gap-2">
+            {!searchTerm && !minApplications ? (
+              <span className="text-xs text-muted-foreground">None</span>
+            ) : null}
+            {searchTerm ? (
+              <Badge variant="outline" className="text-xs">
+                Search: {searchTerm}
+              </Badge>
+            ) : null}
+            {minApplications ? (
+              <Badge variant="outline" className="text-xs">
+                ≥ {minApplications} apps
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       {isLoading ? (
         <Card className="p-8 flex items-center justify-center text-muted-foreground">
           Loading application activity…
@@ -297,34 +347,34 @@ const ApplicationActivityPage = () => {
                   {numberFormatter.format(totals.byRecruiter?.length ?? 0)} recruiters
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="py-2 pr-4 font-medium">Recruiter</th>
-                      <th className="py-2 font-medium text-right">Applications</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {totals.byRecruiter?.length ? (
-                      totals.byRecruiter.map((entry) => (
+              {totals.byRecruiter?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 pr-4 font-medium">Recruiter</th>
+                        <th className="py-2 font-medium text-right">Applications</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {totals.byRecruiter.map((entry) => (
                         <tr key={entry.recruiterId} className="border-t border-border/80">
                           <td className="py-2 pr-4">{entry.recruiterName}</td>
                           <td className="py-2 text-right">
                             {numberFormatter.format(entry.totalApplications)}
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={2} className="py-4 text-center text-muted-foreground">
-                          No recruiter activity in this range.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  icon={Users}
+                  title="No recruiter activity"
+                  description="No applications were logged by recruiters within this range."
+                />
+              )}
             </Card>
             <Card className="p-4">
               <div className="mb-3 flex items-center justify-between">
@@ -333,34 +383,34 @@ const ApplicationActivityPage = () => {
                   {numberFormatter.format(totals.byCandidate?.length ?? 0)} candidates
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="py-2 pr-4 font-medium">Candidate</th>
-                      <th className="py-2 font-medium text-right">Applications</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {totals.byCandidate?.length ? (
-                      totals.byCandidate.map((entry) => (
+              {totals.byCandidate?.length ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="py-2 pr-4 font-medium">Candidate</th>
+                        <th className="py-2 font-medium text-right">Applications</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {totals.byCandidate.map((entry) => (
                         <tr key={entry.candidateId} className="border-t border-border/80">
                           <td className="py-2 pr-4">{entry.candidateName}</td>
                           <td className="py-2 text-right">
                             {numberFormatter.format(entry.totalApplications)}
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={2} className="py-4 text-center text-muted-foreground">
-                          No candidate activity in this range.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  icon={UserCheck}
+                  title="No candidate activity"
+                  description="No candidate submissions were captured with the selected filters."
+                />
+              )}
             </Card>
           </div>
 
@@ -368,22 +418,23 @@ const ApplicationActivityPage = () => {
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-foreground">Detailed activity</h3>
               <span className="text-xs text-muted-foreground">
-                {numberFormatter.format(details.length)} records
+                {numberFormatter.format(filteredDetails.length)} record
+                {filteredDetails.length === 1 ? '' : 's'}
               </span>
             </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-muted-foreground">
-                    <th className="py-2 pr-4 font-medium">Date</th>
-                    <th className="py-2 pr-4 font-medium">Recruiter</th>
-                    <th className="py-2 pr-4 font-medium">Candidate</th>
-                    <th className="py-2 font-medium text-right">Applications</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {details.length ? (
-                    details.map((entry, index) => (
+            {filteredDetails.length ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-muted-foreground">
+                      <th className="py-2 pr-4 font-medium">Date</th>
+                      <th className="py-2 pr-4 font-medium">Recruiter</th>
+                      <th className="py-2 pr-4 font-medium">Candidate</th>
+                      <th className="py-2 font-medium text-right">Applications</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredDetails.map((entry, index) => (
                       <tr
                         key={`${entry.activityDate}-${entry.recruiter.id}-${entry.candidate.id}-${index}`}
                         className="border-t border-border/70"
@@ -397,17 +448,27 @@ const ApplicationActivityPage = () => {
                           {numberFormatter.format(entry.applicationsCount)}
                         </td>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="py-4 text-center text-muted-foreground">
-                        No activity found for the selected filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState
+                icon={ClipboardList}
+                title="No activity found"
+                description="Try expanding the date range or clearing filters to see more data."
+                action={
+                  selectedRecruiter ||
+                  selectedCandidate ||
+                  searchTerm ||
+                  minApplications ? (
+                    <Button type="button" size="sm" variant="outline" onClick={handleClearFilters}>
+                      Reset filters
+                    </Button>
+                  ) : null
+                }
+              />
+            )}
           </Card>
         </div>
       )}

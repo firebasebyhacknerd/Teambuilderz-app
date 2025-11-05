@@ -2,18 +2,25 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const config = require('./lib/config');
+const { validateBody, schemas } = require('./lib/validation');
+const { startAuditStream } = require('./lib/auditStream');
 
 const app = express();
-const port = process.env.BACKEND_PORT || 3001;
-const SECRET_KEY = process.env.JWT_SECRET;
+const port = config.getInt('BACKEND_PORT', 3001);
+const SECRET_KEY = config.get('JWT_SECRET');
 if (!SECRET_KEY) {
   console.error('JWT_SECRET environment variable is required');
   process.exit(1);
 }
+const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+const useSecureCookies = config.getBool('COOKIE_SECURE', isProduction);
+const sameSitePolicy = config.get('COOKIE_SAMESITE', 'strict');
 
 function createLimiter({ windowMs, max, message, name }) {
   const limiterName = name || 'rate-limit';
@@ -136,19 +143,33 @@ function createLoginHandler({ db, jwtLib, bcryptLib, secret }) {
 const AUTH_COOKIE_NAME = 'tbz_auth';
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
+  sameSite: sameSitePolicy,
+  secure: useSecureCookies,
   maxAge: 24 * 60 * 60 * 1000,
 };
 const CLEAR_COOKIE_OPTIONS = {
   httpOnly: true,
-  sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
+  sameSite: sameSitePolicy,
+  secure: useSecureCookies,
 };
-const ALLOWED_ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:3000,http://localhost:3001')
+const ALLOWED_ORIGINS = (config.get('CORS_ORIGIN', 'http://localhost:3000,http://localhost:3001'))
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const enforceTls = config.getBool('ENFORCE_TLS', false);
+const auditLogPath = config.get('AUDIT_LOG_PATH');
+const auditWebhookUrl = config.get('AUDIT_WEBHOOK_URL');
+const auditCloudWatchConfig = {
+  logGroupName: config.get('AUDIT_CW_LOG_GROUP'),
+  logStreamName: config.get('AUDIT_CW_LOG_STREAM'),
+  region: config.get('AUDIT_CW_REGION'),
+  accessKeyId: config.get('AUDIT_CW_ACCESS_KEY'),
+  secretAccessKey: config.get('AUDIT_CW_SECRET_KEY'),
+  sessionToken: config.get('AUDIT_CW_SESSION_TOKEN'),
+};
+const hasAuditCloudWatch =
+  auditCloudWatchConfig.logGroupName && auditCloudWatchConfig.logStreamName && auditCloudWatchConfig.region;
+let auditStreamClient = null;
 
 const LOCAL_IP_REGEXES = [
   /^127\.(\d{1,3}\.){2}\d{1,3}$/u,
@@ -192,13 +213,24 @@ const profileLimiter = createLimiter({
 });
 
 // Database Connection Setup
-const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST || 'localhost',
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT || 5432,
-});
+const dbConfig = {
+  user: config.get('DB_USER'),
+  host: config.get('DB_HOST', 'localhost'),
+  database: config.get('DB_NAME'),
+  password: config.get('DB_PASSWORD'),
+  port: config.getInt('DB_PORT', 5432),
+};
+
+const pool = new Pool(dbConfig);
+
+app.set('trust proxy', 1);
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    referrerPolicy: { policy: 'no-referrer' },
+    crossOriginResourcePolicy: { policy: 'same-site' },
+  }),
+);
 
 // Middleware
 app.use(
@@ -217,6 +249,20 @@ app.use(
   ]),
 );
 
+if (enforceTls) {
+  app.use((req, res, next) => {
+    const forwardedProto = req.headers['x-forwarded-proto'];
+    const isSecure = req.secure || forwardedProto === 'https';
+    if (isSecure) {
+      return next();
+    }
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      return res.redirect(301, `https://${req.headers.host}${req.originalUrl}`);
+    }
+    return res.status(400).json({ message: 'HTTPS required.' });
+  });
+}
+
 // Routes
 app.get('/', (req, res) => {
   res.send('TeamBuilderz Backend API is running!');
@@ -233,6 +279,8 @@ async function ensureEnums(db) {
     CREATE TYPE reminder_status AS ENUM ('pending', 'sent', 'snoozed', 'dismissed');
     CREATE TYPE alert_status AS ENUM ('open', 'acknowledged', 'resolved');
     CREATE TYPE interview_type AS ENUM ('phone', 'video', 'in_person', 'technical', 'hr', 'final');
+    CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave');
+    CREATE TYPE attendance_approval_status AS ENUM ('pending', 'approved', 'rejected');
   `);
 }
 
@@ -393,6 +441,21 @@ async function ensureTables(db) {
       );
     `,
     `
+      CREATE TABLE attendance_entries (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        attendance_date DATE NOT NULL,
+        reported_status attendance_status NOT NULL DEFAULT 'present',
+        approval_status attendance_approval_status NOT NULL DEFAULT 'pending',
+        approved_by INTEGER REFERENCES users(id),
+        approved_at TIMESTAMP WITHOUT TIME ZONE,
+        reviewer_note TEXT,
+        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, attendance_date)
+      );
+    `,
+    `
       CREATE TABLE recruiter_candidate_activity (
         id SERIAL PRIMARY KEY,
         recruiter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -464,6 +527,8 @@ async function ensureIndexes(db) {
     `CREATE INDEX IF NOT EXISTS idx_alerts_user ON alerts(user_id);`,
     `CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);`,
     `CREATE INDEX IF NOT EXISTS idx_audit_logs_table ON audit_logs(table_name);`,
+    `CREATE INDEX IF NOT EXISTS idx_attendance_entries_date ON attendance_entries(attendance_date);`,
+    `CREATE INDEX IF NOT EXISTS idx_attendance_entries_status ON attendance_entries(approval_status);`,
   ];
 
   for (const statement of statements) {
@@ -472,20 +537,55 @@ async function ensureIndexes(db) {
 }
 
 async function seedDefaultUsers(db, bcryptLib) {
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-  const recruiterPassword = process.env.RECRUITER_PASSWORD || 'recruit123';
-  const [hashedAdminPassword, hashedRecruiterPassword] = await Promise.all([
-    bcryptLib.hash(adminPassword, 10),
-    bcryptLib.hash(recruiterPassword, 10),
-  ]);
+  const seeds = [];
 
-  await db.query(
-    `
-      INSERT INTO users (name, email, password_hash, role, daily_quota)
-      VALUES ('Kunal Gupta', 'admin@tbz.us', $1, 'Admin', 0),
-             ('Sarthi Patel', 'sarthi@tbz.us', $2, 'Recruiter', 60);
-    `,
-    [hashedAdminPassword, hashedRecruiterPassword],
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPassword) {
+    seeds.push({
+      name: process.env.ADMIN_NAME || 'System Administrator',
+      email: adminEmail,
+      password: adminPassword,
+      role: 'Admin',
+      dailyQuota: Number(process.env.ADMIN_DAILY_QUOTA ?? 0) || 0,
+    });
+  } else {
+    console.warn(
+      '[Seed] Skipping default admin creation. Provide ADMIN_EMAIL and ADMIN_PASSWORD environment variables to seed an initial admin account.',
+    );
+  }
+
+  const recruiterEmail = process.env.RECRUITER_EMAIL;
+  const recruiterPassword = process.env.RECRUITER_PASSWORD;
+  if (recruiterEmail && recruiterPassword) {
+    seeds.push({
+      name: process.env.RECRUITER_NAME || 'Default Recruiter',
+      email: recruiterEmail,
+      password: recruiterPassword,
+      role: 'Recruiter',
+      dailyQuota: Number(process.env.RECRUITER_DAILY_QUOTA ?? 60) || 60,
+    });
+  }
+
+  if (seeds.length === 0) {
+    return;
+  }
+
+  const hashedPasswords = await Promise.all(
+    seeds.map((seed) => bcryptLib.hash(seed.password, 10)),
+  );
+
+  await Promise.all(
+    seeds.map((seed, index) =>
+      db.query(
+        `
+          INSERT INTO users (name, email, password_hash, role, daily_quota)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT (email) DO NOTHING;
+        `,
+        [seed.name, seed.email, hashedPasswords[index], seed.role, seed.dailyQuota],
+      ),
+    ),
   );
 }
 
@@ -578,9 +678,37 @@ async function ensureSchemaEvolution(db) {
     ensureReminderNoteLink(db),
     ensureUserActivityColumns(db),
     ensureRecruiterCandidateActivityTable(db),
+    ensureAttendanceSchema(db),
   ]);
 
   await ensureCandidateAssignments(db);
+}
+
+async function ensureAuditNotifications(db) {
+  await db.query(`
+    CREATE OR REPLACE FUNCTION notify_audit_event() RETURNS trigger AS $$
+    BEGIN
+      PERFORM pg_notify('audit_event', row_to_json(NEW)::text);
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'audit_event_trigger'
+      ) THEN
+        CREATE TRIGGER audit_event_trigger
+        AFTER INSERT ON audit_logs
+        FOR EACH ROW
+        EXECUTE FUNCTION notify_audit_event();
+      END IF;
+    END;
+    $$;
+  `);
 }
 
 async function ensureRecruiterCandidateActivityTable(db) {
@@ -595,6 +723,60 @@ async function ensureRecruiterCandidateActivityTable(db) {
       updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(recruiter_id, candidate_id, activity_date)
     );
+  `);
+}
+
+async function ensureAttendanceSchema(db) {
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_status') THEN
+        CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave');
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_approval_status') THEN
+        CREATE TYPE attendance_approval_status AS ENUM ('pending', 'approved', 'rejected');
+      END IF;
+    END;
+    $$;
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS attendance_entries (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      attendance_date DATE NOT NULL,
+      reported_status attendance_status NOT NULL DEFAULT 'present',
+      approval_status attendance_approval_status NOT NULL DEFAULT 'pending',
+      approved_by INTEGER REFERENCES users(id),
+      approved_at TIMESTAMP WITHOUT TIME ZONE,
+      reviewer_note TEXT,
+      created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, attendance_date)
+    );
+  `);
+
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'attendance_entries'
+          AND column_name = 'reviewer_note'
+      ) THEN
+        ALTER TABLE attendance_entries
+        ADD COLUMN reviewer_note TEXT;
+      END IF;
+    END;
+    $$;
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_entries_date ON attendance_entries(attendance_date);
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_entries_status ON attendance_entries(approval_status);
   `);
 }
 
@@ -621,6 +803,7 @@ async function setupDatabase() {
     }
 
     await ensureSchemaEvolution(pool);
+    await ensureAuditNotifications(pool);
   } catch (error) {
     console.error('Database setup error:', error.message);
   }
@@ -657,6 +840,36 @@ function getTokenFromRequest(req) {
   }
   return null;
 }
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+const parseDateOnly = (value) => {
+  if (!value) {
+    return null;
+  }
+  const normalized = typeof value === 'string' && !value.includes('T') ? `${value}T00:00:00Z` : value;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+};
+
+const toDateIso = (date) => {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString().split('T')[0];
+};
+
+const addDays = (date, days) => {
+  const reference = date instanceof Date ? date : parseDateOnly(date);
+  if (!reference) {
+    return null;
+  }
+  return new Date(reference.getTime() + days * ONE_DAY_MS);
+};
 
 // Middleware to verify JWT token
 const verifyToken = (req, res, next) => {
@@ -731,7 +944,7 @@ const loginHandler = createLoginHandler({
 });
 
 // Authentication Route
-app.post('/api/v1/auth/login', authLimiter, loginHandler);
+app.post('/api/v1/auth/login', authLimiter, validateBody(schemas.login), loginHandler);
 
 app.post('/api/v1/auth/logout', (req, res) => {
   res.clearCookie(AUTH_COOKIE_NAME, CLEAR_COOKIE_OPTIONS);
@@ -922,7 +1135,7 @@ app.get('/api/v1/candidates', verifyToken, async (req, res) => {
 });
 
 // Create candidate
-app.post('/api/v1/candidates', verifyToken, async (req, res) => {
+app.post('/api/v1/candidates', verifyToken, validateBody(schemas.candidateUpsert), async (req, res) => {
   try {
     const {
       name,
@@ -1004,7 +1217,7 @@ app.post('/api/v1/candidates', verifyToken, async (req, res) => {
 });
 
 // Update candidate
-app.put('/api/v1/candidates/:id', verifyToken, async (req, res) => {
+app.put('/api/v1/candidates/:id', verifyToken, validateBody(schemas.candidateUpsert), async (req, res) => {
   try {
     const candidateId = parseInt(req.params.id, 10);
     if (Number.isNaN(candidateId)) {
@@ -1282,7 +1495,7 @@ app.get('/api/v1/candidates/:id/assignments', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
+app.post('/api/v1/candidates/:id/notes', verifyToken, validateBody(schemas.noteCreate), async (req, res) => {
   try {
     const candidateId = parseInt(req.params.id, 10);
     if (Number.isNaN(candidateId)) {
@@ -1291,7 +1504,7 @@ app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
 
     const candidate = await fetchCandidateWithAccess(candidateId, req.user);
 
-    const { content, isPrivate = false, followUp } = req.body;
+    const { content, is_private = false, followUp } = req.body;
     const trimmedContent = (content || '').trim();
     if (!trimmedContent) {
       return res.status(400).json({ message: 'Note content is required.' });
@@ -1313,7 +1526,7 @@ app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
         VALUES ($1, $2, $3, $4)
         RETURNING id, candidate_id, author_id, content, is_private, created_at
       `,
-      [candidateId, req.user.userId, trimmedContent, Boolean(isPrivate)]
+      [candidateId, req.user.userId, trimmedContent, Boolean(is_private)]
     );
 
     const note = noteResult.rows[0];
@@ -1376,7 +1589,11 @@ app.post('/api/v1/candidates/:id/notes', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/v1/candidates/:candidateId/notes/:noteId', verifyToken, async (req, res) => {
+app.put(
+  '/api/v1/candidates/:candidateId/notes/:noteId',
+  verifyToken,
+  validateBody(schemas.noteUpdate),
+  async (req, res) => {
   try {
     const candidateId = parseInt(req.params.candidateId, 10);
     const noteId = parseInt(req.params.noteId, 10);
@@ -1408,7 +1625,8 @@ app.put('/api/v1/candidates/:candidateId/notes/:noteId', verifyToken, async (req
       return res.status(403).json({ message: 'You do not have permission to edit this note.' });
     }
 
-    const { content, isPrivate = existingNote.is_private, followUp } = req.body;
+    const { content, is_private, followUp } = req.body;
+    const nextPrivacy = typeof is_private === 'boolean' ? is_private : existingNote.is_private;
     const trimmedContent = (content || '').trim();
     if (!trimmedContent) {
       return res.status(400).json({ message: 'Note content is required.' });
@@ -1421,7 +1639,7 @@ app.put('/api/v1/candidates/:candidateId/notes/:noteId', verifyToken, async (req
         WHERE id = $3
         RETURNING id, candidate_id, author_id, content, is_private, created_at
       `,
-      [trimmedContent, Boolean(isPrivate), noteId]
+      [trimmedContent, Boolean(nextPrivacy), noteId]
     );
 
     const updatedNote = updatedNoteResult.rows[0];
@@ -1609,7 +1827,7 @@ app.get('/api/v1/applications', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/applications', verifyToken, async (req, res) => {
+app.post('/api/v1/applications', verifyToken, validateBody(schemas.applicationCreate), async (req, res) => {
   try {
     const {
       candidate_id,
@@ -1681,7 +1899,7 @@ app.post('/api/v1/applications', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
+app.put('/api/v1/applications/:id', verifyToken, validateBody(schemas.applicationUpdate), async (req, res) => {
   try {
     const { id } = req.params;
     const { status, channel, application_date, applications_count } = req.body;
@@ -1824,7 +2042,12 @@ app.put('/api/v1/applications/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/applications/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+app.post(
+  '/api/v1/applications/:id/approval',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.approvalToggle),
+  async (req, res) => {
   try {
     const applicationId = parseInt(req.params.id, 10);
     if (Number.isNaN(applicationId)) {
@@ -2005,7 +2228,7 @@ app.get('/api/v1/interviews', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/interviews', verifyToken, async (req, res) => {
+app.post('/api/v1/interviews', verifyToken, validateBody(schemas.interviewCreate), async (req, res) => {
   try {
     const { candidate_id, application_id, company_name, interview_type, round_number, scheduled_date, timezone } = req.body;
     
@@ -2030,7 +2253,7 @@ app.post('/api/v1/interviews', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
+app.put('/api/v1/interviews/:id', verifyToken, validateBody(schemas.interviewUpdate), async (req, res) => {
   try {
     const interviewId = parseInt(req.params.id, 10);
     if (Number.isNaN(interviewId)) {
@@ -2117,7 +2340,12 @@ app.put('/api/v1/interviews/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/interviews/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+app.post(
+  '/api/v1/interviews/:id/approval',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.approvalToggle),
+  async (req, res) => {
   try {
     const interviewId = parseInt(req.params.id, 10);
     if (Number.isNaN(interviewId)) {
@@ -2226,7 +2454,7 @@ app.get('/api/v1/assessments', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/assessments', verifyToken, async (req, res) => {
+app.post('/api/v1/assessments', verifyToken, validateBody(schemas.assessmentCreate), async (req, res) => {
   try {
     const { candidate_id, application_id, assessment_platform, assessment_type, due_date, notes } = req.body;
     
@@ -2251,7 +2479,7 @@ app.post('/api/v1/assessments', verifyToken, async (req, res) => {
   }
 });
 
-app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
+app.put('/api/v1/assessments/:id', verifyToken, validateBody(schemas.assessmentUpdate), async (req, res) => {
   try {
     const assessmentId = parseInt(req.params.id, 10);
     if (Number.isNaN(assessmentId)) {
@@ -2292,12 +2520,8 @@ app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
     }
 
     if (score !== undefined) {
-      const numericScore = score === null || score === '' ? null : Number(score);
-      if (numericScore !== null && !Number.isFinite(numericScore)) {
-        return res.status(400).json({ message: 'Score must be a number.' });
-      }
       updates.push(`score = $${updates.length + 1}`);
-      params.push(numericScore);
+      params.push(score);
     }
 
     if (notes !== undefined) {
@@ -2333,7 +2557,12 @@ app.put('/api/v1/assessments/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/v1/assessments/:id/approval', verifyToken, requireRole('Admin'), async (req, res) => {
+app.post(
+  '/api/v1/assessments/:id/approval',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.approvalToggle),
+  async (req, res) => {
   try {
     const assessmentId = parseInt(req.params.id, 10);
     if (Number.isNaN(assessmentId)) {
@@ -2462,6 +2691,12 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
     const endDateStr = endDate.toISOString().split('T')[0];
     const startDateTime = `${startDateStr} 00:00:00`;
     const endDateTime = `${endDateStr} 23:59:59`;
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const totalRangeDays = Math.max(1, Math.round((endDate - startDate) / MS_PER_DAY) + 1);
+    const trendWindowDays = Math.min(14, totalRangeDays);
+    const trendStartDate = new Date(endDate);
+    trendStartDate.setDate(endDate.getDate() - (trendWindowDays - 1));
+    const trendStartStr = trendStartDate.toISOString().split('T')[0];
 
     const [
       { rows: candidateSummaryRows },
@@ -2470,6 +2705,7 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
       { rows: productivityRows },
       { rows: rangeActivityRows },
       { rows: applicationsRangeRows },
+      { rows: trendRows },
     ] = await Promise.all([
         pool.query(`
           SELECT
@@ -2561,6 +2797,20 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
           FROM applications
           WHERE application_date BETWEEN $1 AND $2
         `, [startDateStr, endDateStr]),
+        pool.query(
+          `
+            SELECT
+              activity_date,
+              SUM(applications_count)::int AS applications_total,
+              SUM(interviews_count)::int AS interviews_total,
+              SUM(assessments_count)::int AS assessments_total
+            FROM daily_activity
+            WHERE activity_date BETWEEN $1 AND $2
+            GROUP BY activity_date
+            ORDER BY activity_date ASC
+          `,
+          [trendStartStr, endDateStr],
+        ),
       ]);
 
     const candidateSummary = candidateSummaryRows[0] || {
@@ -2579,6 +2829,13 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
     const totalApplicationsInRange = Number(activityTotals.applications_total) || 0;
     const totalInterviewsInRange = Number(activityTotals.interviews_total) || 0;
     const totalAssessmentsInRange = Number(activityTotals.assessments_total) || 0;
+    const avgApplicationsPerDayRaw =
+      totalRangeDays > 0 ? totalApplicationsInRange / totalRangeDays : 0;
+    const recruiterCount = productivityRows.length || 0;
+    const avgApplicationsPerRecruiterPerDayRaw =
+      totalRangeDays > 0 && recruiterCount > 0
+        ? totalApplicationsInRange / (recruiterCount * totalRangeDays)
+        : 0;
 
     const applicationsTodayMetrics = applicationsRangeRows[0] || {
       total: 0,
@@ -2605,6 +2862,8 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
           approved: applicationsApprovedToday,
           pending: applicationsPendingToday,
         },
+        avgApplicationsPerDay: Number(avgApplicationsPerDayRaw.toFixed(2)),
+        avgApplicationsPerRecruiterPerDay: Number(avgApplicationsPerRecruiterPerDayRaw.toFixed(2)),
       },
       candidateStages: stageRows.map((row) => ({
         stage: row.current_stage,
@@ -2627,6 +2886,12 @@ app.get('/api/v1/reports/overview', verifyToken, requireRole('Admin'), async (re
           row.daily_quota && Number(row.daily_quota) > 0
             ? Number(row.applications_in_range || 0) / Number(row.daily_quota)
             : 0,
+      })),
+      activityTrend: trendRows.map((row) => ({
+        date: row.activity_date,
+        applications: Number(row.applications_total) || 0,
+        interviews: Number(row.interviews_total) || 0,
+        assessments: Number(row.assessments_total) || 0,
       })),
       range: {
         dateFrom: startDateStr,
@@ -3018,7 +3283,12 @@ app.get('/api/v1/reports/activity', verifyToken, requireRole('Admin'), async (re
   }
 });
 
-app.post('/api/v1/pending-approvals/bulk', verifyToken, requireRole('Admin'), async (req, res) => {
+app.post(
+  '/api/v1/pending-approvals/bulk',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.bulkPendingApprovals),
+  async (req, res) => {
   const recruiterIdRaw = parseInt(req.body?.recruiterId, 10);
   const action = typeof req.body?.action === 'string' ? req.body.action.toLowerCase() : '';
   const validActions = ['approve', 'reject'];
@@ -4256,6 +4526,487 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
   }
 });
 
+const mapAttendanceRow = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  userName: row.user_name,
+  date: toDateIso(row.attendance_date),
+  reportedStatus: row.reported_status,
+  approvalStatus: row.approval_status,
+  approvedBy: row.approved_by,
+  approvedByName: row.approved_by_name || null,
+  approvedAt: row.approved_at,
+  reviewerNote: row.reviewer_note,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const fetchAttendanceById = async (attendanceId) => {
+  const { rows } = await pool.query(
+    `
+      SELECT
+        ae.id,
+        ae.user_id,
+        ae.attendance_date,
+        ae.reported_status,
+        ae.approval_status,
+        ae.approved_by,
+        ae.approved_at,
+        ae.reviewer_note,
+        ae.created_at,
+        ae.updated_at,
+        u.name AS user_name,
+        approver.name AS approved_by_name
+      FROM attendance_entries ae
+      JOIN users u ON u.id = ae.user_id
+      LEFT JOIN users approver ON approver.id = ae.approved_by
+      WHERE ae.id = $1
+    `,
+    [attendanceId],
+  );
+  return rows[0] ? mapAttendanceRow(rows[0]) : null;
+};
+
+const attendanceStatusFromRow = (row) => {
+  if (!row) {
+    return 'unmarked';
+  }
+  if (row.approval_status === 'approved') {
+    return row.reported_status === 'present' ? 'present' : 'absent';
+  }
+  if (row.approval_status === 'pending') {
+    return 'pending';
+  }
+  if (row.approval_status === 'rejected') {
+    return 'rejected';
+  }
+  return 'unmarked';
+};
+
+app.get('/api/v1/attendance', verifyToken, async (req, res) => {
+  try {
+    const today = parseDateOnly(new Date());
+    let dateFrom = parseDateOnly(req.query?.date_from) || new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    let dateTo = parseDateOnly(req.query?.date_to) || today;
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ message: 'Invalid date range provided.' });
+    }
+    if (dateFrom > dateTo) {
+      const tmp = dateFrom;
+      dateFrom = dateTo;
+      dateTo = tmp;
+    }
+    const rangeDays = Math.round((dateTo - dateFrom) / ONE_DAY_MS) + 1;
+    if (rangeDays > 120) {
+      return res.status(400).json({ message: 'Limit attendance queries to 120 days or fewer.' });
+    }
+
+    const rawUserId = req.query?.user_id;
+    const normalizedUserId = rawUserId === 'self' ? req.user.userId : rawUserId;
+    const allowedStatuses = ['present', 'absent', 'leave'];
+
+    let users = [];
+    if (req.user.role === 'Admin') {
+      if (normalizedUserId) {
+        const parsedId = Number(normalizedUserId);
+        if (!Number.isInteger(parsedId)) {
+          return res.status(400).json({ message: 'Invalid user_id parameter.' });
+        }
+        const { rows } = await pool.query(
+          `SELECT id, name, role FROM users WHERE id = $1`,
+          [parsedId],
+        );
+        if (rows.length === 0) {
+          return res.status(404).json({ message: 'User not found.' });
+        }
+        if (rows[0].role !== 'Recruiter') {
+          return res.status(400).json({ message: 'Attendance tracking is enabled for recruiters only.' });
+        }
+        users = rows.map(({ id, name }) => ({ id, name }));
+      } else {
+        const { rows } = await pool.query(
+          `SELECT id, name FROM users WHERE role = 'Recruiter' ORDER BY name ASC`,
+        );
+        users = rows;
+      }
+    } else {
+      if (normalizedUserId && Number(normalizedUserId) !== req.user.userId) {
+        return res.status(403).json({ message: 'You can only view your own attendance.' });
+      }
+      const { rows } = await pool.query(
+        `SELECT id, name, role FROM users WHERE id = $1`,
+        [req.user.userId],
+      );
+      if (rows.length === 0) {
+        return res.status(404).json({ message: 'User not found.' });
+      }
+      if (rows[0].role !== 'Recruiter') {
+        return res.status(403).json({ message: 'Attendance tracking is limited to recruiter accounts.' });
+      }
+      users = rows.map(({ id, name }) => ({ id, name }));
+    }
+
+    if (users.length === 0) {
+      return res.json({
+        range: {
+          dateFrom: toDateIso(dateFrom),
+          dateTo: toDateIso(dateTo),
+          days: rangeDays,
+        },
+        users: [],
+        days: [],
+        records: [],
+        summary: { present: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
+      });
+    }
+
+    const userIds = users.map((user) => user.id);
+    const { rows: attendanceRowsRaw } = await pool.query(
+      `
+        SELECT
+          ae.id,
+          ae.user_id,
+          ae.attendance_date,
+          ae.reported_status,
+          ae.approval_status,
+          ae.approved_by,
+          ae.approved_at,
+          ae.reviewer_note,
+          ae.created_at,
+          ae.updated_at,
+          u.name AS user_name,
+          approver.name AS approved_by_name
+        FROM attendance_entries ae
+        JOIN users u ON u.id = ae.user_id
+        LEFT JOIN users approver ON approver.id = ae.approved_by
+        WHERE ae.attendance_date BETWEEN $1 AND $2
+          AND ae.user_id = ANY($3)
+        ORDER BY ae.attendance_date ASC, u.name ASC
+      `,
+      [toDateIso(dateFrom), toDateIso(dateTo), userIds],
+    );
+
+    const attendanceRows = attendanceRowsRaw.map((row) => ({
+      ...row,
+      attendance_date: parseDateOnly(row.attendance_date),
+      isoDate: toDateIso(row.attendance_date),
+    }));
+
+    const attendanceMap = new Map();
+    attendanceRows.forEach((row) => {
+      const key = `${row.user_id}-${row.isoDate}`;
+      attendanceMap.set(key, row);
+    });
+
+    const days = [];
+    const daysByUser = new Map();
+    for (const user of users) {
+      const userDays = [];
+      for (
+        let cursor = new Date(dateFrom);
+        cursor <= dateTo;
+        cursor = addDays(cursor, 1)
+      ) {
+        const iso = toDateIso(cursor);
+        const key = `${user.id}-${iso}`;
+        const row = attendanceMap.get(key);
+        const dayOfWeek = cursor.getUTCDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const source = row ? 'record' : isWeekend ? 'auto-weekend' : 'none';
+        const initialStatus = attendanceStatusFromRow(row);
+        const effectiveStatus = source === 'auto-weekend' ? 'present' : initialStatus;
+        const approvalStatus =
+          row?.approval_status ??
+          (source === 'auto-weekend' ? 'auto' : null);
+
+        const dayRecord = {
+          userId: user.id,
+          userName: user.name,
+          date: iso,
+          weekday: WEEKDAY_LABELS[dayOfWeek],
+          isWeekend,
+          recordId: row?.id ?? null,
+          reportedStatus: row?.reported_status ?? (isWeekend ? 'present' : null),
+          approvalStatus,
+          approvedBy: row?.approved_by ?? null,
+          approvedByName: row?.approved_by_name ?? null,
+          approvedAt: row?.approved_at ?? null,
+          reviewerNote: row?.reviewer_note ?? null,
+          effectiveStatus,
+          source,
+          sandwichApplied: false,
+        };
+
+        days.push(dayRecord);
+        userDays.push(dayRecord);
+      }
+      daysByUser.set(user.id, userDays);
+    }
+
+    for (const user of users) {
+      const userDays = daysByUser.get(user.id) || [];
+      const dayMap = new Map(userDays.map((entry) => [entry.date, entry]));
+      for (
+        let cursor = new Date(dateFrom);
+        cursor <= dateTo;
+        cursor = addDays(cursor, 1)
+      ) {
+        if (cursor.getUTCDay() !== 6) {
+          continue;
+        }
+        const fri = toDateIso(addDays(cursor, -1));
+        const sat = toDateIso(cursor);
+        const sun = toDateIso(addDays(cursor, 1));
+        const mon = toDateIso(addDays(cursor, 2));
+        const fridayEntry = dayMap.get(fri);
+        const mondayEntry = dayMap.get(mon);
+
+        if (
+          fridayEntry &&
+          mondayEntry &&
+          fridayEntry.effectiveStatus === 'absent' &&
+          mondayEntry.effectiveStatus === 'absent'
+        ) {
+          const saturdayEntry = dayMap.get(sat);
+          if (saturdayEntry && saturdayEntry.source === 'auto-weekend') {
+            saturdayEntry.effectiveStatus = 'absent';
+            saturdayEntry.approvalStatus = 'sandwich';
+            saturdayEntry.sandwichApplied = true;
+          }
+          const sundayEntry = dayMap.get(sun);
+          if (sundayEntry && sundayEntry.source === 'auto-weekend') {
+            sundayEntry.effectiveStatus = 'absent';
+            sundayEntry.approvalStatus = 'sandwich';
+            sundayEntry.sandwichApplied = true;
+          }
+        }
+      }
+    }
+
+    const summary = days.reduce(
+      (acc, day) => {
+        if (day.effectiveStatus === 'present' && (day.approvalStatus === 'approved' || day.approvalStatus === 'auto')) {
+          acc.present += 1;
+          if (day.source === 'auto-weekend') {
+            acc.autoPresent += 1;
+          }
+          return acc;
+        }
+
+        if (day.effectiveStatus === 'absent') {
+          acc.absent += 1;
+          if (day.sandwichApplied) {
+            acc.sandwichAbsent += 1;
+          }
+          return acc;
+        }
+
+        if (day.effectiveStatus === 'pending' || day.effectiveStatus === 'unmarked' || day.effectiveStatus === 'rejected') {
+          acc.pending += 1;
+        }
+        return acc;
+      },
+      { present: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
+    );
+
+    const pendingOnly = String(req.query?.pending_only || '').toLowerCase() === 'true';
+    const allRecords = attendanceRows.map(mapAttendanceRow);
+    const records = pendingOnly
+      ? allRecords.filter((record) => record.approvalStatus === 'pending')
+      : allRecords;
+
+    res.json({
+      range: {
+        dateFrom: toDateIso(dateFrom),
+        dateTo: toDateIso(dateTo),
+        days: rangeDays,
+      },
+      users,
+      days,
+      records,
+      summary,
+      metadata: {
+        statuses: allowedStatuses,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching attendance:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+app.post(
+  '/api/v1/attendance',
+  verifyToken,
+  validateBody(schemas.attendanceCreate),
+  async (req, res) => {
+    try {
+      const isAdmin = req.user.role === 'Admin';
+      const targetUserId = isAdmin && req.body.user_id ? Number(req.body.user_id) : req.user.userId;
+      if (!Number.isInteger(targetUserId)) {
+        return res.status(400).json({ message: 'Invalid user id for attendance submission.' });
+      }
+      if (!isAdmin && req.body.user_id && Number(req.body.user_id) !== req.user.userId) {
+        return res.status(403).json({ message: 'You can only submit attendance for yourself.' });
+      }
+
+      const { rows: userRows } = await pool.query(
+        `SELECT id, name, role FROM users WHERE id = $1`,
+        [targetUserId],
+      );
+      if (userRows.length === 0) {
+        return res.status(404).json({ message: 'User not found.' });
+      }
+      if (userRows[0].role !== 'Recruiter') {
+        return res.status(400).json({ message: 'Attendance submission is only available for recruiters.' });
+      }
+
+      const attendanceDate = parseDateOnly(req.body.attendance_date) || parseDateOnly(new Date());
+      if (!attendanceDate) {
+        return res.status(400).json({ message: 'Invalid attendance_date. Use YYYY-MM-DD format.' });
+      }
+      const attendanceDateIso = toDateIso(attendanceDate);
+
+      const reportedStatus = req.body.status || 'present';
+      const validStatuses = ['present', 'absent', 'leave'];
+      if (!validStatuses.includes(reportedStatus)) {
+        return res.status(400).json({ message: 'Unsupported attendance status.' });
+      }
+
+      let approvalStatus = 'pending';
+      let approvedBy = null;
+      let approvedAt = null;
+      let reviewerNote = null;
+
+      if (isAdmin) {
+        approvalStatus = req.body.approval_status || 'approved';
+        reviewerNote = req.body.reviewer_note ?? null;
+        if (approvalStatus === 'approved') {
+          approvedBy = req.user.userId;
+          approvedAt = new Date();
+        }
+      }
+
+      const result = await pool.query(
+        `
+          INSERT INTO attendance_entries (
+            user_id,
+            attendance_date,
+            reported_status,
+            approval_status,
+            approved_by,
+            approved_at,
+            reviewer_note
+          )
+          VALUES ($1, $2, $3::attendance_status, $4::attendance_approval_status, $5, $6, $7)
+          ON CONFLICT (user_id, attendance_date)
+          DO UPDATE SET
+            reported_status = EXCLUDED.reported_status,
+            approval_status = EXCLUDED.approval_status,
+            approved_by = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_by ELSE NULL END,
+            approved_at = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_at ELSE NULL END,
+            reviewer_note = EXCLUDED.reviewer_note,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id
+        `,
+        [
+          targetUserId,
+          attendanceDateIso,
+          reportedStatus,
+          approvalStatus,
+          approvedBy,
+          approvedAt,
+          reviewerNote,
+        ],
+      );
+
+      const attendanceId = result.rows[0]?.id;
+      if (!attendanceId) {
+        return res.status(500).json({ message: 'Failed to record attendance.' });
+      }
+
+      const record = await fetchAttendanceById(attendanceId);
+      res.status(201).json(record);
+    } catch (error) {
+      console.error('Error submitting attendance:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  },
+);
+
+app.put(
+  '/api/v1/attendance/:id',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.attendanceUpdate),
+  async (req, res) => {
+    try {
+      const attendanceId = Number(req.params.id);
+      if (!Number.isInteger(attendanceId)) {
+        return res.status(400).json({ message: 'Invalid attendance id.' });
+      }
+
+      const { status, approval_status, reviewer_note } = req.body;
+      const updates = [];
+      const params = [];
+      let idx = 1;
+
+      if (status !== undefined) {
+        updates.push(`reported_status = $${idx}::attendance_status`);
+        params.push(status);
+        idx += 1;
+      }
+      if (approval_status !== undefined) {
+        updates.push(`approval_status = $${idx}::attendance_approval_status`);
+        params.push(approval_status);
+        idx += 1;
+      }
+      if (reviewer_note !== undefined) {
+        updates.push(`reviewer_note = $${idx}`);
+        params.push(reviewer_note);
+        idx += 1;
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({ message: 'No attendance fields provided for update.' });
+      }
+
+      if (approval_status !== undefined) {
+        if (approval_status === 'approved') {
+          updates.push(`approved_by = $${idx}`);
+          params.push(req.user.userId);
+          idx += 1;
+          updates.push(`approved_at = CURRENT_TIMESTAMP`);
+        } else {
+          updates.push(`approved_by = NULL`);
+          updates.push(`approved_at = NULL`);
+        }
+      }
+
+      updates.push(`updated_at = CURRENT_TIMESTAMP`);
+
+      params.push(attendanceId);
+      const updateSql = `
+        UPDATE attendance_entries
+        SET ${updates.join(', ')}
+        WHERE id = $${idx}
+        RETURNING id
+      `;
+
+      const { rows } = await pool.query(updateSql, params);
+      if (rows.length === 0) {
+        return res.status(404).json({ message: 'Attendance record not found.' });
+      }
+
+      const record = await fetchAttendanceById(attendanceId);
+      res.json(record);
+    } catch (error) {
+      console.error('Error updating attendance:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  },
+);
+
 app.get('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => {
   try {
     const result = await pool.query(`
@@ -4271,7 +5022,7 @@ app.get('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => 
   }
 });
 
-app.post('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) => {
+app.post('/api/v1/users', verifyToken, requireRole('Admin'), validateBody(schemas.userCreate), async (req, res) => {
   try {
     const { name, email, password, role, daily_quota } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -4289,7 +5040,12 @@ app.post('/api/v1/users', verifyToken, requireRole('Admin'), async (req, res) =>
   }
 });
 
-app.put('/api/v1/users/:id', verifyToken, requireRole('Admin'), async (req, res) => {
+app.put(
+  '/api/v1/users/:id',
+  verifyToken,
+  requireRole('Admin'),
+  validateBody(schemas.userUpdate),
+  async (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
     if (Number.isNaN(userId)) {
@@ -4507,6 +5263,22 @@ function scheduleAutomationTasks() {
   console.log('Automation tasks scheduled');
 }
 
+async function initAuditStream() {
+  if (auditStreamClient) {
+    return;
+  }
+  try {
+    auditStreamClient = await startAuditStream({
+      connection: dbConfig,
+      logPath: auditLogPath,
+      webhookUrl: auditWebhookUrl,
+      cloudWatch: hasAuditCloudWatch ? auditCloudWatchConfig : null,
+    });
+  } catch (error) {
+    console.error('Failed to initialise audit stream:', error.message);
+  }
+}
+
 // Start server and initialize database
 async function startServer() {
   try {
@@ -4514,6 +5286,7 @@ async function startServer() {
     client.release();
     console.log('Connected to PostgreSQL!');
     await setupDatabase();
+    await initAuditStream();
     
     // Start automation tasks
     scheduleAutomationTasks();
@@ -4571,6 +5344,21 @@ async function startServer() {
 }
 
 startServer();
+
+const shutdown = async () => {
+  console.log('Shutting down TeamBuilderz backend...');
+  if (auditStreamClient) {
+    try {
+      await auditStreamClient.end();
+    } catch (error) {
+      console.error('Error closing audit stream:', error.message);
+    }
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 
 

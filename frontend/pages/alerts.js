@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Bell,
@@ -16,6 +16,7 @@ import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import API_URL from '../lib/api';
+import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../lib/refreshBus';
 
 const AlertsPage = () => {
   const router = useRouter();
@@ -26,7 +27,7 @@ const AlertsPage = () => {
   const [actionError, setActionError] = useState('');
   const [userRole, setUserRole] = useState('Admin');
 
-  const fetchAlerts = async () => {
+  const fetchAlerts = useCallback(async () => {
     const token = localStorage.getItem('token');
     if (!token) {
       router.push('/login');
@@ -54,7 +55,7 @@ const AlertsPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -62,8 +63,9 @@ const AlertsPage = () => {
       if (storedRole) setUserRole(storedRole);
     }
     fetchAlerts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchAlerts]);
+
+  useRefreshListener(REFRESH_CHANNELS.ALERTS, fetchAlerts);
 
   const filteredAlerts = useMemo(
     () => alerts.filter((alert) => (!statusFilter ? true : alert.status === statusFilter)),
@@ -143,6 +145,8 @@ const AlertsPage = () => {
 
       const updatedAlert = await response.json();
       setAlerts((prev) => prev.map((alert) => (alert.id === updatedAlert.id ? updatedAlert : alert)));
+      emitRefresh(REFRESH_CHANNELS.ALERTS);
+      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
     } catch (error) {
       console.error(`Error updating alert (${action}):`, error);
       setActionError(error.message);

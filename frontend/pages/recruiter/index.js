@@ -1,11 +1,19 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, CircleUser, Home, TrendingUp, Clock } from 'lucide-react';
+import { useCallback } from 'react';
+import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, CircleUser, Home, TrendingUp, Clock, CalendarCheck } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
-import { useRecruiterProfileQuery, useNotificationsQuery } from '../../lib/queryHooks';
+import {
+  useRecruiterProfileQuery,
+  useNotificationsQuery,
+  useAttendanceQuery,
+  useSubmitAttendanceMutation,
+} from '../../lib/queryHooks';
+import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../../lib/refreshBus';
 
 const DAILY_TARGET = 60;
 const numberFormatter = new Intl.NumberFormat();
@@ -24,6 +32,14 @@ const humanize = (value) => {
     .join(' ');
 };
 
+const attendanceStatusTone = {
+  present: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  absent: 'bg-red-100 text-red-800 border border-red-200',
+  pending: 'bg-amber-100 text-amber-800 border border-amber-200',
+  unmarked: 'bg-slate-100 text-slate-700 border border-slate-200',
+  rejected: 'bg-rose-100 text-rose-800 border border-rose-200',
+};
+
 const RecruiterDashboard = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
@@ -33,6 +49,13 @@ const RecruiterDashboard = () => {
   const [weeklyAvg, setWeeklyAvg] = useState(0);
   const [monthlyAvg, setMonthlyAvg] = useState(0);
   const [userName, setUserName] = useState('Recruiter');
+  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const monthStartIso = useMemo(() => {
+    const today = new Date();
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    return start.toISOString().split('T')[0];
+  }, []);
+  const [attendanceMessage, setAttendanceMessage] = useState(null);
 
   const totalAppsToday = useMemo(
     () => candidates.reduce((sum, c) => sum + parseInt(c.daily_applications || 0, 10), 0),
@@ -68,60 +91,106 @@ const RecruiterDashboard = () => {
     if (storedName) {
       setUserName(storedName);
     }
+  }, [router]);
 
-    const headers = { Authorization: `Bearer ${storedToken}` };
+  const authHeaders = useMemo(
+    () => (token ? { Authorization: `Bearer ${token}` } : null),
+    [token],
+  );
 
-    const fetchCandidates = async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/v1/candidates`, { headers });
-        if (response.status === 401 || response.status === 403) {
-          router.push('/login');
-          return;
-        }
-        if (!response.ok) {
-          throw new Error('Failed to fetch candidates.');
-        }
-        setCandidates(await response.json());
-      } catch (error) {
-        console.error(error.message);
-      } finally {
+  const fetchCandidates = useCallback(async () => {
+    if (!authHeaders) {
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/api/v1/candidates`, { headers: authHeaders });
+      if (response.status === 401 || response.status === 403) {
+        router.push('/login');
+        return;
+      }
+      if (!response.ok) {
+        throw new Error('Failed to fetch candidates.');
+      }
+      setCandidates(await response.json());
+    } catch (error) {
+      console.error(error.message);
+    }
+  }, [authHeaders, router]);
+
+  const fetchPerformance = useCallback(async () => {
+    if (!authHeaders) {
+      return;
+    }
+    try {
+      const today = new Date();
+      const weekAgo = new Date(today);
+      weekAgo.setDate(today.getDate() - 6);
+      const weekFrom = weekAgo.toISOString().split('T')[0];
+      const weekTo = today.toISOString().split('T')[0];
+      const monthFrom = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+      const monthTo = today.toISOString().split('T')[0];
+
+      const [weekRes, monthRes] = await Promise.all([
+        fetch(`${API_URL}/api/v1/reports/performance?date_from=${weekFrom}&date_to=${weekTo}`, { headers: authHeaders }),
+        fetch(`${API_URL}/api/v1/reports/performance?date_from=${monthFrom}&date_to=${monthTo}`, { headers: authHeaders }),
+      ]);
+
+      const [weekData, monthData] = await Promise.all([weekRes.json(), monthRes.json()]);
+      const matchingName = userName || '';
+      const weekRec = Array.isArray(weekData) ? weekData.find((r) => r.recruiter_name === matchingName) : null;
+      const monthRec = Array.isArray(monthData) ? monthData.find((r) => r.recruiter_name === matchingName) : null;
+      setWeeklyAvg(weekRec ? Math.round(weekRec.avg_apps_per_day || 0) : 0);
+      setMonthlyAvg(monthRec ? Math.round(monthRec.avg_apps_per_day || 0) : 0);
+    } catch (error) {
+      setWeeklyAvg(0);
+      setMonthlyAvg(0);
+    }
+  }, [authHeaders, userName]);
+
+  useEffect(() => {
+    if (!token || !authHeaders) {
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      await Promise.all([fetchCandidates(), fetchPerformance()]);
+      if (!cancelled) {
         setLoading(false);
       }
     };
-
-    const fetchAverages = async () => {
-      try {
-        const today = new Date();
-        const weekAgo = new Date(today);
-        weekAgo.setDate(today.getDate() - 6);
-        const weekFrom = weekAgo.toISOString().split('T')[0];
-        const weekTo = today.toISOString().split('T')[0];
-        const monthFrom = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const monthTo = today.toISOString().split('T')[0];
-
-        const [weekRes, monthRes] = await Promise.all([
-          fetch(`${API_URL}/api/v1/reports/performance?date_from=${weekFrom}&date_to=${weekTo}`, { headers }),
-          fetch(`${API_URL}/api/v1/reports/performance?date_from=${monthFrom}&date_to=${monthTo}`, { headers })
-        ]);
-
-        const [weekData, monthData] = await Promise.all([weekRes.json(), monthRes.json()]);
-        const matchingName = storedName || '';
-        const weekRec = Array.isArray(weekData) ? weekData.find((r) => r.recruiter_name === matchingName) : null;
-        const monthRec = Array.isArray(monthData) ? monthData.find((r) => r.recruiter_name === matchingName) : null;
-        setWeeklyAvg(weekRec ? Math.round(weekRec.avg_apps_per_day || 0) : 0);
-        setMonthlyAvg(monthRec ? Math.round(monthRec.avg_apps_per_day || 0) : 0);
-      } catch (error) {
-        setWeeklyAvg(0);
-        setMonthlyAvg(0);
-      }
+    load();
+    return () => {
+      cancelled = true;
     };
+  }, [authHeaders, fetchCandidates, fetchPerformance, token]);
 
-    setLoading(true);
-    fetchCandidates();
-    fetchAverages();
-  }, [router]);
+  useRefreshListener(REFRESH_CHANNELS.CANDIDATES, fetchCandidates);
+  useRefreshListener(REFRESH_CHANNELS.PERFORMANCE, fetchPerformance);
+  useRefreshListener(REFRESH_CHANNELS.DASHBOARD, fetchPerformance);
 
   const metricsEnabled = Boolean(token) && typeof userId === 'number';
+  const attendanceQueryParams = useMemo(
+    () => ({
+      date_from: monthStartIso,
+      date_to: todayIso,
+    }),
+    [monthStartIso, todayIso],
+  );
+  const {
+    data: attendanceData,
+    isFetching: attendanceLoading,
+  } = useAttendanceQuery(token, attendanceQueryParams, Boolean(token));
+  const submitAttendance = useSubmitAttendanceMutation(token, {
+    onSuccess: () => {
+      setAttendanceMessage({ type: 'success', text: 'Attendance submitted for admin approval.' });
+      emitRefresh(REFRESH_CHANNELS.ATTENDANCE);
+      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
+    },
+    onError: (error) => {
+      setAttendanceMessage({ type: 'error', text: error.message || 'Unable to submit attendance.' });
+    },
+  });
   const { data: notificationsData } = useNotificationsQuery(token, metricsEnabled);
   const [toastAlert, setToastAlert] = useState(null);
   const [lastAlertKey, setLastAlertKey] = useState(null);
@@ -132,10 +201,65 @@ const RecruiterDashboard = () => {
   } = useRecruiterProfileQuery(token, userId, undefined, metricsEnabled);
 
   useEffect(() => {
+    if (!attendanceMessage) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setAttendanceMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [attendanceMessage]);
+
+  useEffect(() => {
     if (profileError) {
       console.error('Unable to load recruiter metrics.');
     }
   }, [profileError]);
+
+  const todayAttendance = useMemo(() => {
+    if (!attendanceData?.days) {
+      return null;
+    }
+    return attendanceData.days.find((day) => day.date === todayIso) || null;
+  }, [attendanceData, todayIso]);
+
+  const attendanceEffective = todayAttendance?.effectiveStatus ?? 'unmarked';
+  const attendanceApproval = todayAttendance?.approvalStatus ?? (todayAttendance ? 'pending' : 'not-submitted');
+  const attendanceDisplayStatus = attendanceEffective === 'unmarked' ? 'not-submitted' : attendanceEffective;
+  const isApprovedPresent =
+    Boolean(todayAttendance) &&
+    todayAttendance.effectiveStatus === 'present' &&
+    (todayAttendance.approvalStatus === 'approved' || todayAttendance.approvalStatus === 'auto');
+  const attendanceStatusDetail = useMemo(() => {
+    if (!todayAttendance) {
+      return 'Submit attendance once you start your day.';
+    }
+    if (todayAttendance.approvalStatus === 'auto') {
+      return 'Weekend attendance is auto-marked as present.';
+    }
+    if (todayAttendance.approvalStatus === 'sandwich') {
+      return 'Weekend counted as leave because Friday and Monday are approved absences.';
+    }
+    if (todayAttendance.approvalStatus === 'pending') {
+      return 'Waiting for admin approval. You can resubmit if needed.';
+    }
+    if (todayAttendance.approvalStatus === 'approved') {
+      return todayAttendance.reportedStatus === 'present'
+        ? 'Admin approved your presence for today.'
+        : 'Admin marked today as leave.';
+    }
+    if (todayAttendance.approvalStatus === 'rejected') {
+      return 'Submission rejected. Submit again if you were present.';
+    }
+    return 'Attendance requires attention.';
+  }, [todayAttendance]);
+  const submitAttendanceDisabled = submitAttendance.isPending || isApprovedPresent;
+
+  const handleAttendanceSubmit = () => {
+    setAttendanceMessage(null);
+    submitAttendance.mutate({
+      attendance_date: todayIso,
+      status: 'present',
+    });
+  };
 
   useEffect(() => {
     if (!notificationsData?.alerts || notificationsData.alerts.length === 0) {
@@ -294,6 +418,49 @@ const RecruiterDashboard = () => {
         </div>
       ) : null}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <CalendarCheck className="text-primary h-6 w-6" />
+            <div>
+              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Attendance</p>
+              <h2 className="text-xl font-semibold text-foreground">Today</h2>
+            </div>
+          </div>
+          {attendanceMessage ? (
+            <div
+              className={`rounded-lg border px-3 py-2 text-xs ${
+                attendanceMessage.type === 'success'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                  : 'border-rose-200 bg-rose-50 text-rose-900'
+              }`}
+            >
+              {attendanceMessage.text}
+            </div>
+          ) : null}
+          <div className="flex items-center gap-3">
+            <Badge
+              variant="outline"
+              className={`capitalize ${attendanceStatusTone[attendanceEffective] ?? 'bg-slate-100 text-slate-700 border border-slate-200'}`}
+            >
+              {attendanceDisplayStatus}
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              {attendanceLoading
+                ? 'Refreshing status…'
+                : todayAttendance
+                  ? attendanceApproval === 'auto'
+                    ? 'Weekend auto present'
+                    : attendanceApproval === 'sandwich'
+                      ? 'Sandwich leave applied'
+                      : `Admin status: ${attendanceApproval}`
+                  : 'No submission yet.'}
+            </span>
+          </div>
+          <Button className="w-full" onClick={handleAttendanceSubmit} disabled={submitAttendanceDisabled}>
+            {submitAttendance.isPending ? 'Submitting…' : 'Submit attendance'}
+          </Button>
+          <p className="text-xs text-muted-foreground leading-relaxed">{attendanceStatusDetail}</p>
+        </Card>
         <Card className="p-6 lg:col-span-2 space-y-6">
           <div className="flex items-center gap-3">
             <UserCheck className="text-primary h-6 w-6" />
