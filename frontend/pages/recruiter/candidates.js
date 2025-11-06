@@ -121,6 +121,24 @@ const CandidatesPage = () => {
     router.push('/login');
   };
 
+  const navigateToCandidate = useCallback(
+    (candidateId) => {
+      if (!candidateId) return;
+      router.push(`/recruiter/candidate/${candidateId}`);
+    },
+    [router],
+  );
+
+  const handleCandidateKeyDown = useCallback(
+    (event, candidateId) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        navigateToCandidate(candidateId);
+      }
+    },
+    [navigateToCandidate],
+  );
+
   const handleRecruiterLinkClick = (event, recruiterId) => {
     event.stopPropagation();
     if (!recruiterId) return;
@@ -248,10 +266,12 @@ const CandidatesPage = () => {
               const stageLabel = stageLabels[stage] || stage;
 
               return (
-                <button
+                <div
                   key={candidate.id}
-                  type="button"
-                  onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigateToCandidate(candidate.id)}
+                  onKeyDown={(event) => handleCandidateKeyDown(event, candidate.id)}
                   className="w-full text-left px-4 py-3 sm:px-6 sm:py-4 hover:bg-accent transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
                 >
                   <div>
@@ -270,11 +290,11 @@ const CandidatesPage = () => {
                     )}
                   </div>
                   <div className="flex items-center gap-3 sm:gap-6">
-                    <Badge className={badgeTone}>{stageLabel}</Badge>
-                    <div className="text-xs sm:text-sm text-muted-foreground">
-                      <span className="font-semibold text-foreground">
-                        {candidate.daily_applications || 0}
-                      </span>{' '}
+                      <Badge className={badgeTone}>{stageLabel}</Badge>
+                      <div className="text-xs sm:text-sm text-muted-foreground">
+                        <span className="font-semibold text-foreground">
+                          {candidate.daily_applications || 0}
+                        </span>{' '}
                       today &middot;{' '}
                       <span className="font-semibold text-emerald-600">
                         {candidate.approved_applications || 0}
@@ -285,13 +305,13 @@ const CandidatesPage = () => {
                       </span>{' '}
                       pending
                     </div>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
       </Card>
     </DashboardLayout>
   );

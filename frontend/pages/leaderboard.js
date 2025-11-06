@@ -71,6 +71,57 @@ const LeaderboardPage = () => {
     };
   }, [leaderboard]);
 
+  const currentUserEntry = useMemo(
+    () => leaderboard.find((entry) => entry.name === userName) ?? null,
+    [leaderboard, userName],
+  );
+
+  const nextRankEntry = useMemo(() => {
+    if (!currentUserEntry || currentUserEntry.rank <= 1) {
+      return null;
+    }
+    return leaderboard.find((entry) => entry.rank === currentUserEntry.rank - 1) ?? null;
+  }, [currentUserEntry, leaderboard]);
+
+  const quotaProgress = useMemo(() => {
+    if (!currentUserEntry?.dailyQuota) {
+      return 0;
+    }
+    return Math.min(
+      100,
+      Math.round(((currentUserEntry.todayApplications || 0) / currentUserEntry.dailyQuota) * 100),
+    );
+  }, [currentUserEntry]);
+
+  const remainingToQuota = useMemo(() => {
+    if (!currentUserEntry?.dailyQuota) {
+      return 0;
+    }
+    return Math.max(0, currentUserEntry.dailyQuota - (currentUserEntry.todayApplications || 0));
+  }, [currentUserEntry]);
+
+  const achievements = useMemo(() => {
+    if (!currentUserEntry) {
+      return [];
+    }
+    const badges = [];
+    if (currentUserEntry.rank === 1) {
+      badges.push('Leaderboard leader');
+    } else if (currentUserEntry.rank && currentUserEntry.rank <= 3) {
+      badges.push('Top 3 performer');
+    }
+    if (
+      currentUserEntry.dailyQuota &&
+      currentUserEntry.todayApplications >= currentUserEntry.dailyQuota
+    ) {
+      badges.push('Quota crusher');
+    }
+    if (currentUserEntry.weekApplications >= 200) {
+      badges.push('Volume hero');
+    }
+    return badges;
+  }, [currentUserEntry]);
+
   const handleNavigateToRecruiter = (recruiterId) => {
     if (!recruiterId) {
       return;
@@ -108,6 +159,57 @@ const LeaderboardPage = () => {
               accent="bg-purple-100 text-purple-700"
             />
           </div>
+
+          {currentUserEntry && (
+            <Card className="p-5 space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+                    Your rank
+                  </p>
+                  <p className="text-2xl font-bold text-foreground">#{currentUserEntry.rank}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {nextRankEntry
+                      ? `${nextRankEntry.name} is ahead by ${Math.max(
+                          0,
+                          nextRankEntry.weekApplications - currentUserEntry.weekApplications,
+                        )} apps this week`
+                      : 'You are leading the board—keep it up!'}
+                  </p>
+                </div>
+                <Badge variant="outline" className="gap-1">
+                  <Flame className="h-3.5 w-3.5 text-amber-500" />
+                  {currentUserEntry.todayApplications}/{currentUserEntry.dailyQuota ?? '—'} today
+                </Badge>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Daily quota progress</span>
+                  <span>{quotaProgress}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-muted">
+                  <div
+                    className="h-2 rounded-full bg-primary transition-all"
+                    style={{ width: `${quotaProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {remainingToQuota > 0
+                    ? `${remainingToQuota} more applications to hit today's goal.`
+                    : 'Quota met—push for stretch goals!'}
+                </p>
+              </div>
+              {achievements.length ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  {achievements.map((badge) => (
+                    <Badge key={badge} variant="secondary" className="text-xs">
+                      {badge}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
+            </Card>
+          )}
 
           {topPerformer && (
             <Card
@@ -162,13 +264,18 @@ const LeaderboardPage = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {leaderboard.map((entry) => (
-                    <tr key={entry.recruiterId} className="hover:bg-muted/30 transition">
-                      <td className="px-6 py-3">
-                        <Badge variant={entry.rank === 1 ? 'default' : 'outline'} className="gap-1">
-                          #{entry.rank}
-                          {entry.rank === 1 && <Award className="h-3 w-3" />}
-                        </Badge>
+                  {leaderboard.map((entry) => {
+                    const isCurrentUser = entry.name === userName;
+                    const rowClasses = `hover:bg-muted/30 transition ${
+                      isCurrentUser ? 'bg-amber-50' : ''
+                    }`;
+                    return (
+                      <tr key={entry.recruiterId} className={rowClasses}>
+                        <td className="px-6 py-3">
+                          <Badge variant={entry.rank === 1 ? 'default' : 'outline'} className="gap-1">
+                            #{entry.rank}
+                            {entry.rank === 1 && <Award className="h-3 w-3" />}
+                          </Badge>
                       </td>
                       <td className="px-6 py-3">
                         <button
@@ -177,6 +284,11 @@ const LeaderboardPage = () => {
                           className="flex w-full flex-col text-left bg-transparent p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 rounded"
                         >
                           <span className="text-sm font-semibold text-foreground">{entry.name}</span>
+                          {isCurrentUser && (
+                            <Badge variant="secondary" className="w-fit text-[10px] mt-1">
+                              You
+                            </Badge>
+                          )}
                           <span className="text-xs text-muted-foreground">
                             {entry.totalApplications} lifetime apps {'\u00B7'} quota {entry.dailyQuota}
                           </span>
@@ -187,18 +299,19 @@ const LeaderboardPage = () => {
                       <td className="px-6 py-3 text-sm text-foreground">{entry.monthApplications}</td>
                       <td className="px-6 py-3 text-sm text-foreground">{entry.activeCandidates}</td>
                       <td className="px-6 py-3 text-sm text-foreground">{entry.notesLast7Days}</td>
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             {leaderboard.length === 0 && (
-              <div className="py-12 text-center space-y-2">
-                <TrendingUp size={40} className="mx-auto text-muted-foreground" />
-                <h3 className="text-lg font-medium text-foreground">No recruiter activity yet</h3>
-                <p className="text-sm text-muted-foreground">Once applications start flowing in, the leaderboard will light up.</p>
-              </div>
+              <EmptyState
+                icon={TrendingUp}
+                title="No recruiter activity yet"
+                description="Once applications start flowing in, the leaderboard will light up."
+              />
             )}
           </Card>
         </div>

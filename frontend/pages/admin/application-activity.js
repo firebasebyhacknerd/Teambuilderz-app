@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { BarChart3, LogOut, Users, UserCheck, ClipboardList } from 'lucide-react';
+import RecruiterBarChart from '../../components/analytics/RecruiterBarChart';
+import CandidateBarChart from '../../components/analytics/CandidateBarChart';
+import ApplicationTrendChart from '../../components/analytics/ApplicationTrendChart';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
 import { Card } from '../../components/ui/card';
@@ -26,6 +29,7 @@ const rangeOptions = [
   { value: '7d', label: 'Last 7 days', days: 7 },
   { value: '30d', label: 'Last 30 days', days: 30 },
   { value: '90d', label: 'Last 90 days', days: 90 },
+  { value: 'custom', label: 'Custom range' },
 ];
 
 const selectClass =
@@ -36,6 +40,7 @@ const ApplicationActivityPage = () => {
   const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Admin');
   const [range, setRange] = useState('30d');
+  const [customRange, setCustomRange] = useState({ start: '', end: '' });
   const [selectedRecruiter, setSelectedRecruiter] = useState('');
   const [selectedCandidate, setSelectedCandidate] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,12 +65,32 @@ const ApplicationActivityPage = () => {
   }, [router]);
 
   const rangeConfig = useMemo(() => {
-    const option = rangeOptions.find((item) => item.value === range) ?? rangeOptions[1];
+    const toStr = (date) => date.toISOString().split('T')[0];
+
+    if (range === 'custom' && customRange.start && customRange.end) {
+      const startDate = new Date(customRange.start);
+      const endDate = new Date(customRange.end);
+      if (!Number.isNaN(startDate.getTime()) && !Number.isNaN(endDate.getTime())) {
+        const normalizedStart = startDate <= endDate ? startDate : endDate;
+        const normalizedEnd = startDate <= endDate ? endDate : startDate;
+        return {
+          value: 'custom',
+          label: 'Custom range',
+          startDate: normalizedStart,
+          endDate: normalizedEnd,
+          startDateStr: toStr(normalizedStart),
+          endDateStr: toStr(normalizedEnd),
+        };
+      }
+    }
+
+    const option =
+      rangeOptions.find((item) => item.value === range && item.days) ?? rangeOptions[1];
     const today = new Date();
     const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startDate = new Date(endDate);
-    startDate.setDate(endDate.getDate() - (option.days - 1));
-    const toStr = (date) => date.toISOString().split('T')[0];
+    startDate.setDate(endDate.getDate() - ((option.days ?? 30) - 1));
+
     return {
       ...option,
       startDate,
@@ -73,7 +98,7 @@ const ApplicationActivityPage = () => {
       startDateStr: toStr(startDate),
       endDateStr: toStr(endDate),
     };
-  }, [range]);
+  }, [customRange.end, customRange.start, range]);
 
   const filterParams = useMemo(
     () => ({
@@ -84,6 +109,7 @@ const ApplicationActivityPage = () => {
     }),
     [rangeConfig.startDateStr, rangeConfig.endDateStr, selectedRecruiter, selectedCandidate],
   );
+  const hasCustomRange = range === 'custom' && customRange.start && customRange.end;
 
   const {
     data: report,
@@ -126,10 +152,32 @@ const ApplicationActivityPage = () => {
   }, [router]);
 
   const handleClearFilters = useCallback(() => {
+    setRange('30d');
+    setCustomRange({ start: '', end: '' });
     setSelectedRecruiter('');
     setSelectedCandidate('');
     setSearchTerm('');
     setMinApplications('');
+  }, []);
+
+  const handleCustomShortcut = useCallback((shortcut) => {
+    const today = new Date();
+    const endISO = today.toISOString().split('T')[0];
+    const start = new Date(today);
+
+    if (shortcut === 'week') {
+      start.setDate(start.getDate() - 6);
+    } else if (shortcut === 'month') {
+      start.setDate(1);
+    } else if (shortcut === 'quarter') {
+      const month = start.getMonth();
+      const quarterStartMonth = month - (month % 3);
+      start.setMonth(quarterStartMonth, 1);
+    }
+
+    const startISO = start.toISOString().split('T')[0];
+    setRange('custom');
+    setCustomRange({ start: startISO, end: endISO });
   }, []);
 
   const totals = report?.totals ?? {
@@ -197,59 +245,144 @@ const ApplicationActivityPage = () => {
           </Button>
         </div>
       }
-    >
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-foreground">Reporting Window</p>
-          <p className="text-sm text-muted-foreground">
-            {dateFormatter.format(rangeConfig.startDate)} – {dateFormatter.format(rangeConfig.endDate)}
+    >      <div className="mb-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Reporting Window</p>
+            <p className="text-sm text-muted-foreground">
+              {dateFormatter.format(rangeConfig.startDate)} — {dateFormatter.format(rangeConfig.endDate)}
+            </p>
+            <p className="text-xs text-muted-foreground">Last updated {generatedLabel}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={selectedRecruiter}
+              onChange={(event) => setSelectedRecruiter(event.target.value)}
+              className={selectClass}
+            >
+              <option value="">All recruiters</option>
+              {recruiterOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                  {option.isActive ? '' : ' (inactive)'}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedCandidate}
+              onChange={(event) => setSelectedCandidate(event.target.value)}
+              className={selectClass}
+            >
+              <option value="">All candidates</option>
+              {candidateOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+            <Button variant="ghost" size="sm" onClick={handleClearFilters}>
+              Clear filters
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+            Date range
           </p>
-          <p className="text-xs text-muted-foreground">Last updated {generatedLabel}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={range}
-            onChange={(event) => setRange(event.target.value)}
-            className={selectClass}
-          >
+          <div className="flex flex-wrap items-center gap-2">
             {rangeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={range === option.value ? 'default' : 'outline'}
+                onClick={() => setRange(option.value)}
+              >
                 {option.label}
-              </option>
+              </Button>
             ))}
-          </select>
-          <select
-            value={selectedRecruiter}
-            onChange={(event) => setSelectedRecruiter(event.target.value)}
-            className={selectClass}
-          >
-            <option value="">All recruiters</option>
-            {recruiterOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-                {option.isActive ? '' : ' (inactive)'}
-              </option>
-            ))}
-          </select>
-          <select
-            value={selectedCandidate}
-            onChange={(event) => setSelectedCandidate(event.target.value)}
-            className={selectClass}
-          >
-            <option value="">All candidates</option>
-            {candidateOptions.map((option) => (
-              <option key={option.id} value={option.id}>
-                {option.name}
-              </option>
-            ))}
-          </select>
-          <Button variant="ghost" size="sm" onClick={handleClearFilters}>
-            Clear filters
-          </Button>
+          </div>
+          {range === 'custom' ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-card/40 p-4 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="custom-start"
+                    className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+                  >
+                    Start date
+                  </Label>
+                  <Input
+                    id="custom-start"
+                    type="date"
+                    value={customRange.start}
+                    onChange={(event) =>
+                      setCustomRange((prev) => ({ ...prev, start: event.target.value }))
+                    }
+                    max={customRange.end || undefined}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="custom-end"
+                    className="text-xs font-semibold uppercase text-muted-foreground tracking-wide"
+                  >
+                    End date
+                  </Label>
+                  <Input
+                    id="custom-end"
+                    type="date"
+                    value={customRange.end}
+                    onChange={(event) =>
+                      setCustomRange((prev) => ({ ...prev, end: event.target.value }))
+                    }
+                    min={customRange.start || undefined}
+                  />
+                </div>
+                <div className="space-y-1 lg:col-span-2">
+                  <Label className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
+                    Shortcuts
+                  </Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCustomShortcut('week')}
+                    >
+                      This week
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCustomShortcut('month')}
+                    >
+                      This month
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCustomShortcut('quarter')}
+                    >
+                      Quarter to date
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setCustomRange({ start: '', end: '' })}
+                    >
+                      Clear dates
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
-      </div>
-
-      <div className="mb-6 grid gap-4 md:grid-cols-3">
+      </div>      <div className="mb-6 grid gap-4 md:grid-cols-3">
         <div className="space-y-2">
           <Label htmlFor="activity-search" className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
             Quick search
@@ -289,7 +422,7 @@ const ApplicationActivityPage = () => {
             ) : null}
             {minApplications ? (
               <Badge variant="outline" className="text-xs">
-                ≥ {minApplications} apps
+                â‰¥ {minApplications} apps
               </Badge>
             ) : null}
           </div>
@@ -298,7 +431,7 @@ const ApplicationActivityPage = () => {
 
       {isLoading ? (
         <Card className="p-8 flex items-center justify-center text-muted-foreground">
-          Loading application activity…
+          Loading application activityâ€¦
         </Card>
       ) : (
         <div className="space-y-6">
@@ -308,7 +441,7 @@ const ApplicationActivityPage = () => {
               <p className="text-2xl font-semibold text-foreground">
                 {numberFormatter.format(totals.overall ?? 0)}
               </p>
-              {reportRefreshing && <p className="text-xs text-muted-foreground mt-1">Refreshing…</p>}
+              {reportRefreshing && <p className="text-xs text-muted-foreground mt-1">Refreshingâ€¦</p>}
             </Card>
             <Card className="p-4">
               <p className="text-sm text-muted-foreground">Top recruiter</p>
@@ -316,7 +449,9 @@ const ApplicationActivityPage = () => {
                 {topRecruiter ? topRecruiter.recruiterName : '—'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {topRecruiter ? `${numberFormatter.format(topRecruiter.totalApplications)} applications` : 'No data'}
+                {topRecruiter
+                  ? `${numberFormatter.format(topRecruiter.totalApplications)} applications`
+                  : 'No data'}
               </p>
             </Card>
             <Card className="p-4">
@@ -325,7 +460,9 @@ const ApplicationActivityPage = () => {
                 {topCandidate ? topCandidate.candidateName : '—'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {topCandidate ? `${numberFormatter.format(topCandidate.totalApplications)} applications` : 'No data'}
+                {topCandidate
+                  ? `${numberFormatter.format(topCandidate.totalApplications)} applications`
+                  : 'No data'}
               </p>
             </Card>
             <Card className="p-4">
@@ -334,10 +471,27 @@ const ApplicationActivityPage = () => {
                 {peakDay ? dateFormatter.format(new Date(peakDay.date)) : '—'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {peakDay ? `${numberFormatter.format(peakDay.totalApplications)} applications` : 'No data'}
+                {peakDay
+                  ? `${numberFormatter.format(peakDay.totalApplications)} applications`
+                  : 'No data'}
               </p>
             </Card>
           </div>
+
+          <Card className="p-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Daily application trend</h3>
+                <p className="text-xs text-muted-foreground">
+                  Logged vs. approved submissions across the selected window.
+                </p>
+              </div>
+              <Badge variant="outline" className="text-xs">
+                {hasCustomRange ? 'Custom range' : rangeConfig.label}
+              </Badge>
+            </div>
+            <ApplicationTrendChart data={totals.byDate ?? []} />
+          </Card>
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Card className="p-4">
@@ -348,26 +502,7 @@ const ApplicationActivityPage = () => {
                 </span>
               </div>
               {totals.byRecruiter?.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-muted-foreground">
-                        <th className="py-2 pr-4 font-medium">Recruiter</th>
-                        <th className="py-2 font-medium text-right">Applications</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {totals.byRecruiter.map((entry) => (
-                        <tr key={entry.recruiterId} className="border-t border-border/80">
-                          <td className="py-2 pr-4">{entry.recruiterName}</td>
-                          <td className="py-2 text-right">
-                            {numberFormatter.format(entry.totalApplications)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <RecruiterBarChart data={totals.byRecruiter} />
               ) : (
                 <EmptyState
                   icon={Users}
@@ -384,26 +519,7 @@ const ApplicationActivityPage = () => {
                 </span>
               </div>
               {totals.byCandidate?.length ? (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-muted-foreground">
-                        <th className="py-2 pr-4 font-medium">Candidate</th>
-                        <th className="py-2 font-medium text-right">Applications</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {totals.byCandidate.map((entry) => (
-                        <tr key={entry.candidateId} className="border-t border-border/80">
-                          <td className="py-2 pr-4">{entry.candidateName}</td>
-                          <td className="py-2 text-right">
-                            {numberFormatter.format(entry.totalApplications)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <CandidateBarChart data={totals.byCandidate} />
               ) : (
                 <EmptyState
                   icon={UserCheck}
@@ -477,4 +593,15 @@ const ApplicationActivityPage = () => {
 };
 
 export default ApplicationActivityPage;
+
+
+
+
+
+
+
+
+
+
+
 

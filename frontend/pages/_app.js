@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { configureAnalytics, flushAnalytics, track } from '../lib/analytics';
 import API_URL from '../lib/api';
 import { ThemeProvider } from '../lib/theme';
+import { ToastProvider } from '../components/ui/toast-provider';
 
 function MyApp({ Component, pageProps }) {
   const [queryClient] = useState(
@@ -95,6 +96,7 @@ function MyApp({ Component, pageProps }) {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <Component {...pageProps} />
+          <ToastProvider />
         </ThemeProvider>
       </QueryClientProvider>
     </>

@@ -1,18 +1,18 @@
-# TeamBuilderz Admin Portal (React + Firebase Edition)
+# TeamBuilderz Admin Portal
 
-TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a Single-Page Application (SPA) built with React and Vite, using Google Firebase for its backend services.
+TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a web application built with Next.js for the frontend and an Express.js API for the backend, using PostgreSQL as the database.
 
 ---
 
 ## Tech Stack & Tools
 
-| Layer    | Technology                   | Notes                                                |
-| -------- | ---------------------------- | ---------------------------------------------------- |
-| Frontend | React 18, Vite, Tailwind CSS | A modern, fast Single-Page Application.              |
-| Backend  | Firebase (Serverless)        | Uses Firestore and Firebase Auth. No backend server. |
-| Database | Cloud Firestore (NoSQL)      | Real-time document database for candidate data.      |
-| Auth     | Firebase Authentication      | Secure, shared access for internal LAN use.          |
-| Tooling  | npm, dotenv                  | Dependency management, environment configuration.    |
+| Layer    | Technology                       | Notes                                             |
+| -------- | -------------------------------- | ------------------------------------------------- |
+| Frontend | Next.js (React 18), Tailwind CSS | A modern, server-rendered React application.      |
+| Backend  | Express.js (Node.js)             | A robust API server for business logic.           |
+| Database | PostgreSQL 14+                   | A powerful, open-source relational database.      |
+| Auth     | JWT (JSON Web Tokens)            | Secure, shared access for internal LAN use.       |
+| Tooling  | npm, dotenv                      | Dependency management, environment configuration. |
 
 > Recommended to install: **Node.js 18+**, **npm 8+**, **Git**.
 
