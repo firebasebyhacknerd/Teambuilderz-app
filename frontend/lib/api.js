@@ -6,9 +6,17 @@ const buildBrowserUrl = () => {
 
   const protocol = window.location.protocol || 'http:';
   const hostname = window.location.hostname || 'localhost';
+  const browserPort = window.location.port;
+
+  // When the app runs behind the HTTPS nginx proxy there is no explicit port,
+  // so we have to route API calls through the proxied /api path.
+  if (protocol === 'https:' && (!browserPort || browserPort === '443')) {
+    return `${protocol}//${hostname}/api`;
+  }
+
   const port =
     process.env.NEXT_PUBLIC_API_PORT ||
-    (window.location.port === '3000' ? '3001' : window.location.port) ||
+    (browserPort === '3000' ? '3001' : browserPort) ||
     '3001';
 
   return port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;

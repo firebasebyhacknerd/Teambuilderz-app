@@ -1,20 +1,20 @@
-# TeamBuilderz Application
+# TeamBuilderz Admin Portal (React + Firebase Edition)
 
-TeamBuilderz is a full-stack staffing operations platform that helps recruiters and admins manage candidates, applications, interviews, assessments, and operational alerts in one place. The project is split into a Node.js/Express backend (API + automation jobs) and a Next.js frontend UI.
+TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a Single-Page Application (SPA) built with React and Vite, using Google Firebase for its backend services.
 
 ---
 
 ## Tech Stack & Tools
 
-| Layer        | Technology                            | Notes                                                |
-|--------------|----------------------------------------|------------------------------------------------------|
-| Backend      | Node.js, Express, PostgreSQL, `pg`     | REST API, JWT authentication, background schedulers |
-| Frontend     | Next.js 14 (React 18), Tailwind CSS    | Admin & Recruiter dashboards                         |
-| Auth & Crypto| JSON Web Tokens, `bcryptjs`            | Password hashing, role-based access                  |
-| Scheduling   | Node timers (`setInterval`)            | Quota/assessment/interview checks                    |
-| Tooling      | npm, dotenv                            | Dependency management, environment configuration     |
+| Layer    | Technology                   | Notes                                                |
+| -------- | ---------------------------- | ---------------------------------------------------- |
+| Frontend | React 18, Vite, Tailwind CSS | A modern, fast Single-Page Application.              |
+| Backend  | Firebase (Serverless)        | Uses Firestore and Firebase Auth. No backend server. |
+| Database | Cloud Firestore (NoSQL)      | Real-time document database for candidate data.      |
+| Auth     | Firebase Authentication      | Secure, shared access for internal LAN use.          |
+| Tooling  | npm, dotenv                  | Dependency management, environment configuration.    |
 
-> Recommended to install: **Node.js 18+**, **npm 8+**, **PostgreSQL 14+**, **Git**. Docker is optional if you prefer containerized services.
+> Recommended to install: **Node.js 18+**, **npm 8+**, **Git**.
 
 ---
 
@@ -38,18 +38,21 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
 ## Quick Start
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/<your-org>/Teambuilderz-app.git
    cd Teambuilderz-app
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install --prefix backend
    npm install --prefix frontend
    ```
 
 3. **Prepare PostgreSQL**
+
    ```sql
    CREATE DATABASE teambuilderz;
    CREATE USER teambuilderz_user WITH PASSWORD 'teambuilderz_password';
@@ -57,6 +60,7 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
    ```
 
 4. **Configure environment variables**
+
    - Copy `backend/.env` and `frontend/.env` to your own versions (or edit in place).
    - Important backend variables:
      ```env
@@ -73,6 +77,7 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
      NEXT_PUBLIC_API_URL=http://localhost:3001
      ```
    - Optional security/env hardening toggles:
+
      ```env
      ENFORCE_TLS=true                 # Redirect HTTP → HTTPS (requires proxy that sets X-Forwarded-Proto)
      COOKIE_SECURE=true               # Force secure cookies even outside NODE_ENV=production
@@ -87,6 +92,7 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
      AUDIT_CW_SECRET_KEY=...
      AUDIT_CW_SESSION_TOKEN=...
      ```
+
      Values defined in `SECRETS_FILE` take precedence over process env vars, making it easy to source secrets
      from Docker/K8s secret mounts without polluting `.env`.
 
@@ -95,14 +101,17 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
      rejections, and user changes that SecOps can monitor centrally.
 
 5. **Run the backend**
+
    ```bash
    npm run dev --prefix backend   # Nodemon hot reload
    # or
    npm start --prefix backend     # Production-style start
    ```
+
    On first boot the API auto-creates required tables, enums, and default users if they do not already exist.
 
 6. **Run the frontend**
+
    ```bash
    npm run dev --prefix frontend  # Next.js dev server on http://localhost:3000
    # or
@@ -124,6 +133,7 @@ TeamBuilderz is a full-stack staffing operations platform that helps recruiters 
 - Optional: **Docker Desktop** if you prefer containerized DB/services
 
 Verify your tooling:
+
 ```bash
 node -v   # should be >= 18
 npm -v
@@ -148,9 +158,11 @@ npm ci --prefix frontend
 ### 4. Database Bootstrapping
 
 The backend automatically ensures enums, tables, indexes, and seed users when it starts. If you want to validate manually:
+
 ```bash
 npm start --prefix backend
 ```
+
 You should see logs such as “Connected to PostgreSQL!” and “Database tables already exist. Skipping initialization.”
 
 ### 5. Running the Stack
@@ -187,7 +199,7 @@ All services use `restart: unless-stopped`, so once Docker Desktop is running th
 On Windows you can fully automate container start-up with:
 
 1. **Enable Docker Desktop auto-start**  
-   Settings → General → ✅ *Start Docker Desktop when you log in*.
+   Settings → General → ✅ _Start Docker Desktop when you log in_.
 2. **Register a scheduled task that runs `docker compose up -d` after you sign in**  
    Open an elevated PowerShell prompt in the repo root and run:
    ```powershell
@@ -282,6 +294,7 @@ npm start --prefix frontend  # serves the built Next.js app
 ```
 
 The backend can be PM2/forever managed; for local prod parity use:
+
 ```bash
 NODE_ENV=production npm start --prefix backend
 ```
@@ -290,13 +303,13 @@ NODE_ENV=production npm start --prefix backend
 
 ## Common Issues & Troubleshooting
 
-| Symptom                                        | Likely Cause & Fix                                                                 |
-|------------------------------------------------|-------------------------------------------------------------------------------------|
-| `EADDRINUSE: address already in use :::3000`   | Another process (often Docker Desktop/WSL) is using the port. Stop it or change `PORT`. |
-| `password authentication failed for user …`    | PostgreSQL user/password mismatch. Verify credentials or create the expected role. |
-| `relation "daily_activity" does not exist`     | Schema wasn’t initialized. Re-run backend start to auto-create tables.              |
-| Frontend “Failed to fetch” on login            | `NEXT_PUBLIC_API_URL` not pointing to reachable backend (or backend down).          |
-| Blank pages / build errors after updates       | Clear `.next/` (`rimraf frontend/.next`) and rebuild.                               |
+| Symptom                                      | Likely Cause & Fix                                                                      |
+| -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `EADDRINUSE: address already in use :::3000` | Another process (often Docker Desktop/WSL) is using the port. Stop it or change `PORT`. |
+| `password authentication failed for user …`  | PostgreSQL user/password mismatch. Verify credentials or create the expected role.      |
+| `relation "daily_activity" does not exist`   | Schema wasn’t initialized. Re-run backend start to auto-create tables.                  |
+| Frontend “Failed to fetch” on login          | `NEXT_PUBLIC_API_URL` not pointing to reachable backend (or backend down).              |
+| Blank pages / build errors after updates     | Clear `.next/` (`rimraf frontend/.next`) and rebuild.                                   |
 
 ---
 
@@ -316,6 +329,7 @@ NODE_ENV=production npm start --prefix backend
 5. Submit a pull request describing changes and testing performed.
 
 Suggested enhancements:
+
 - Add migrations (using `sequelize-cli` or `knex`) to track schema changes.
 - Containerize with Docker Compose for reproducible environments.
 - Wire up automated tests and CI for pull requests.
@@ -325,6 +339,7 @@ Suggested enhancements:
 ## Support
 
 If you encounter setup issues:
+
 - Confirm environment variables and database connectivity.
 - Check server logs in the backend terminal.
 - Reach out to the TeamBuilderz engineering channel with log excerpts and steps taken.

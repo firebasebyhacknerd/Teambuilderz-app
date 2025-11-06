@@ -2278,18 +2278,19 @@ app.put('/api/v1/interviews/:id', verifyToken, validateBody(schemas.interviewUpd
 
     const updates = [];
     const params = [];
+    let paramIndex = 1;
 
     if (status !== undefined) {
       const allowedStatuses = ['scheduled', 'completed', 'feedback_pending', 'rejected', 'advanced'];
       if (!allowedStatuses.includes(status)) {
         return res.status(400).json({ message: 'Invalid interview status.' });
       }
-      updates.push(`status = $${updates.length + 1}`);
+      updates.push(`status = $${paramIndex++}`);
       params.push(status);
     }
 
     if (scheduled_date !== undefined) {
-      updates.push(`scheduled_date = $${updates.length + 1}`);
+      updates.push(`scheduled_date = $${paramIndex++}`);
       params.push(scheduled_date ? new Date(scheduled_date) : null);
     }
 
@@ -2298,17 +2299,17 @@ app.put('/api/v1/interviews/:id', verifyToken, validateBody(schemas.interviewUpd
       if (!Number.isFinite(roundNumber) || roundNumber < 1) {
         return res.status(400).json({ message: 'Round number must be a positive integer.' });
       }
-      updates.push(`round_number = $${updates.length + 1}`);
+      updates.push(`round_number = $${paramIndex++}`);
       params.push(roundNumber);
     }
 
     if (timezone !== undefined) {
-      updates.push(`timezone = $${updates.length + 1}`);
+      updates.push(`timezone = $${paramIndex++}`);
       params.push(timezone || null);
     }
 
     if (notes !== undefined) {
-      updates.push(`notes = $${updates.length + 1}`);
+      updates.push(`notes = $${paramIndex++}`);
       params.push(notes || null);
     }
 
@@ -2323,7 +2324,7 @@ app.put('/api/v1/interviews/:id', verifyToken, validateBody(schemas.interviewUpd
       `
         UPDATE interviews
         SET ${updates.join(', ')}
-        WHERE id = $${params.length}
+        WHERE id = $${paramIndex}
         RETURNING *
       `,
       params,
