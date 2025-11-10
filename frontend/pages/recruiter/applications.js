@@ -24,6 +24,7 @@ import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
+import EmptyState from '../../components/ui/empty-state';
 import {
   useApplicationsQuery,
   useInterviewsQuery,

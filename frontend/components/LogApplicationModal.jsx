@@ -354,7 +354,7 @@ const LogApplicationModal = ({ token, onApplicationLogged }) => {
         <DialogHeader>
           <DialogTitle>Log New Application</DialogTitle>
           <DialogDescription>
-            Log today's outreach volume. Target is 60 applications—add a quick note if you logged fewer.
+            Log today&apos;s outreach volume. Target is 60 applications&mdash;add a quick note if you logged fewer.
           </DialogDescription>
         </DialogHeader>
 
@@ -612,3 +612,5 @@ const LogApplicationModal = ({ token, onApplicationLogged }) => {
 };
 
 export default LogApplicationModal;
+
+

@@ -4,6 +4,7 @@ import { Trophy, TrendingUp, Users, Target, Flame, Award, Home, FileText, AlertT
 import DashboardLayout from '../components/Layout/DashboardLayout';
 import { Card } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import EmptyState from '../components/ui/empty-state';
 import { useLeaderboardQuery } from '../lib/queryHooks';
 
 const LeaderboardPage = () => {

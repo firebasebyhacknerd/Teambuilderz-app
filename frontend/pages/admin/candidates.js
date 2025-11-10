@@ -10,6 +10,7 @@ import {
   FileText,
   AlertTriangle,
   User,
+  UserCheck,
   BarChart3,
   TrendingUp,
   CircleUser,

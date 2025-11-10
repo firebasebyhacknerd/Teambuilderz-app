@@ -263,7 +263,7 @@ const CandidatesPage = () => {
             {filteredCandidates.map((candidate) => {
               const stage = candidate.current_stage || 'onboarding';
               const badgeTone = stageStyles[stage] ?? 'bg-slate-100 text-slate-700';
-              const stageLabel = stageLabels[stage] || stage;
+              const stageLabelText = stageLabels[stage] || stage;
 
               return (
                 <div
@@ -290,7 +290,7 @@ const CandidatesPage = () => {
                     )}
                   </div>
                   <div className="flex items-center gap-3 sm:gap-6">
-                      <Badge className={badgeTone}>{stageLabel}</Badge>
+                    <Badge className={badgeTone}>{stageLabelText}</Badge>
                       <div className="text-xs sm:text-sm text-muted-foreground">
                         <span className="font-semibold text-foreground">
                           {candidate.daily_applications || 0}
