@@ -14,6 +14,10 @@ const nextConfig = {
   experimental: {
     allowedDevOrigins: ["http://192.168.1.230:3000"],
   },
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
 }
 
 module.exports = nextConfig
