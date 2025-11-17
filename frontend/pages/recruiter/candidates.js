@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useCallback } from 'react';
 import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
@@ -9,7 +9,7 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { useCandidatesQuery } from '../../lib/queryHooks';
-import API_URL from '../../lib/api';
+import useAuthState from '../../lib/useAuthState';
 
 const stageStyles = {
   onboarding: 'bg-blue-100 text-blue-700',
@@ -33,27 +33,10 @@ const stageOptions = Object.entries(stageLabels).map(([value, label]) => ({ valu
 
 const CandidatesPage = () => {
   const router = useRouter();
-  const [token, setToken] = useState('');
-  const [userName, setUserName] = useState('Recruiter');
-  const [userRole, setUserRole] = useState('Recruiter');
+  const { token, userName, userRole, ready, logout } = useAuthState();
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
-
-  useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    if (!storedToken) {
-      router.push('/login');
-      return;
-    }
-    setToken(storedToken);
-
-    const storedRole = localStorage.getItem('userRole');
-    if (storedRole) setUserRole(storedRole);
-
-    const storedName = localStorage.getItem('userName');
-    if (storedName) setUserName(storedName);
-  }, [router]);
 
   const { data: candidates = [], isLoading } = useCandidatesQuery(token, Boolean(token));
 
@@ -318,4 +301,7 @@ const CandidatesPage = () => {
 };
 
 export default CandidatesPage;
+
+
+
 

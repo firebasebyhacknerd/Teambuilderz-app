@@ -10,17 +10,21 @@ const bcrypt = require('bcryptjs');
 const config = require('./lib/config');
 const { validateBody, schemas } = require('./lib/validation');
 const { startAuditStream } = require('./lib/auditStream');
+const { fetchUserProfile } = require('./services/profileService');
 
+const NODE_ENV = (process.env.NODE_ENV || '').toLowerCase();
+const isTestEnv = NODE_ENV === 'test';
 const app = express();
 const port = config.getInt('BACKEND_PORT', 3001);
-const SECRET_KEY = config.get('JWT_SECRET');
+const SECRET_KEY = config.get('JWT_SECRET', isTestEnv ? 'test-secret' : undefined);
 if (!SECRET_KEY) {
   console.error('JWT_SECRET environment variable is required');
   process.exit(1);
 }
-const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+const isProduction = NODE_ENV === 'production';
 const useSecureCookies = config.getBool('COOKIE_SECURE', isProduction);
 const sameSitePolicy = config.get('COOKIE_SAMESITE', 'strict');
+const defaultSkipDbSetup = config.getBool('SKIP_DB_SETUP', isTestEnv);
 
 function createLimiter({ windowMs, max, message, name }) {
   const limiterName = name || 'rate-limit';
@@ -170,6 +174,13 @@ const auditCloudWatchConfig = {
 const hasAuditCloudWatch =
   auditCloudWatchConfig.logGroupName && auditCloudWatchConfig.logStreamName && auditCloudWatchConfig.region;
 let auditStreamClient = null;
+let automationIntervals = [];
+let serverInstance = null;
+const automationSchedule = {
+  quotaMinutes: config.getInt('AUTOMATION_QUOTA_INTERVAL_MINUTES', 60) || 60,
+  assessmentMinutes: config.getInt('AUTOMATION_ASSESSMENT_INTERVAL_MINUTES', 360) || 360,
+  interviewMinutes: config.getInt('AUTOMATION_INTERVIEW_INTERVAL_MINUTES', 120) || 120,
+};
 
 const LOCAL_IP_REGEXES = [
   /^127\.(\d{1,3}\.){2}\d{1,3}$/u,
@@ -265,7 +276,7 @@ if (enforceTls) {
 
 // Routes
 app.get('/', (req, res) => {
-  res.send('TeamBuilderz Backend API is running!');
+  res.json({ message: 'Backend is running' });
 });
 
 // Database Schema Setup
@@ -964,20 +975,11 @@ app.post('/api/v1/analytics', analyticsLimiter, verifyToken, (req, res) => {
 
 app.get('/api/v1/profile', verifyToken, async (req, res) => {
   try {
-    const result = await pool.query(
-      `
-      SELECT id, name, email, role, daily_quota, created_at, updated_at
-      FROM users
-      WHERE id = $1
-    `,
-      [req.user.userId]
-    );
-
-    if (result.rows.length === 0) {
+    const profile = await fetchUserProfile(pool, req.user.userId);
+    if (!profile) {
       return res.status(404).json({ message: 'User not found' });
     }
-
-    res.json(result.rows[0]);
+    res.json(profile);
   } catch (error) {
     console.error('Error fetching profile:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -5250,18 +5252,32 @@ async function checkInterviewReminders() {
   }
 }
 
+function stopAutomationTasks() {
+  automationIntervals.forEach((intervalId) => clearInterval(intervalId));
+  automationIntervals = [];
+}
+
+const minutesToMs = (minutes) => Math.max(minutes, 0) * 60 * 1000;
+
 // Schedule automation tasks
 function scheduleAutomationTasks() {
-  // Check daily quotas every hour
-  setInterval(checkDailyQuotas, 60 * 60 * 1000);
-  
-  // Check assessment deadlines every 6 hours
-  setInterval(checkAssessmentDeadlines, 6 * 60 * 60 * 1000);
-  
-  // Check interview reminders every 2 hours
-  setInterval(checkInterviewReminders, 2 * 60 * 60 * 1000);
-  
-  console.log('Automation tasks scheduled');
+  stopAutomationTasks();
+
+  const entries = [
+    { handler: checkDailyQuotas, minutes: automationSchedule.quotaMinutes },
+    { handler: checkAssessmentDeadlines, minutes: automationSchedule.assessmentMinutes },
+    { handler: checkInterviewReminders, minutes: automationSchedule.interviewMinutes },
+  ];
+
+  automationIntervals = entries
+    .filter(({ minutes }) => minutes > 0)
+    .map(({ handler, minutes }) => setInterval(handler, minutesToMs(minutes)));
+
+  if (automationIntervals.length > 0) {
+    console.log('Automation tasks scheduled');
+  } else {
+    console.log('Automation scheduling disabled via configuration.');
+  }
 }
 
 async function initAuditStream() {
@@ -5280,88 +5296,142 @@ async function initAuditStream() {
   }
 }
 
-// Start server and initialize database
-async function startServer() {
+async function initializeInfrastructure({ skipDb } = {}) {
+  if (skipDb) {
+    console.log('Skipping database initialization as requested.');
+    return;
+  }
   try {
     const client = await pool.connect();
     client.release();
     console.log('Connected to PostgreSQL!');
     await setupDatabase();
     await initAuditStream();
-    
-    // Start automation tasks
     scheduleAutomationTasks();
-    
-    // Run initial checks
     await checkDailyQuotas();
     await checkAssessmentDeadlines();
     await checkInterviewReminders();
-    
   } catch (err) {
     console.error('Database connection failed:', err.message);
     console.log('Starting server without database connection for testing...');
   }
+}
 
-  app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
-    console.log('API endpoints available:');
-    console.log('  Authentication:');
-    console.log('    POST /api/v1/auth/login - User login');
-    console.log('  Candidates:');
-    console.log('    GET  /api/v1/candidates - Get candidates (requires auth)');
-    console.log('    POST /api/v1/candidates - Create candidate (requires auth)');
-    console.log('    PUT  /api/v1/candidates/:id - Update candidate (requires auth)');
-    console.log('    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)');
-    console.log('    POST /api/v1/candidates/:id/notes - Create note (requires auth)');
-    console.log('    GET  /api/v1/candidates/:id/assignments - Assignment history (requires auth)');
-    console.log('    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)');
-    console.log('    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)');
-    console.log('  Applications:');
-    console.log('    GET  /api/v1/applications - Get applications (requires auth)');
-    console.log('    POST /api/v1/applications - Create application (requires auth)');
-    console.log('  Interviews:');
-    console.log('    GET  /api/v1/interviews - Get interviews (requires auth)');
-    console.log('    POST /api/v1/interviews - Create interview (requires auth)');
-    console.log('  Assessments:');
-    console.log('    GET  /api/v1/assessments - Get assessments (requires auth)');
-    console.log('    POST /api/v1/assessments - Create assessment (requires auth)');
-    console.log('  Reports:');
-    console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
-    console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
-    console.log('    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)');
-    console.log('    GET  /api/v1/reports/application-activity - Recruiter & candidate application totals (requires admin)');
-    console.log('    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)');
-    console.log('  Notifications:');
-    console.log('    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)');
-    console.log('  Alerts:');
-    console.log('    GET  /api/v1/alerts - Get alerts (requires auth)');
-    console.log('  Users (Admin only):');
-    console.log('    GET  /api/v1/users/activity - User activity (requires admin)');
-    console.log('    GET  /api/v1/users - Get users (requires admin)');
-    console.log('    POST /api/v1/users - Create user (requires admin)');
-    console.log('    PUT  /api/v1/users/:id - Update user (requires admin)');
-    console.log('    DELETE /api/v1/users/:id - Delete user (requires admin)');
+function logAvailableEndpoints(resolvedPort) {
+  console.log(`Server running on http://localhost:${resolvedPort}`);
+  console.log('API endpoints available:');
+  console.log('  Authentication:');
+  console.log('    POST /api/v1/auth/login - User login');
+  console.log('  Candidates:');
+  console.log('    GET  /api/v1/candidates - Get candidates (requires auth)');
+  console.log('    POST /api/v1/candidates - Create candidate (requires auth)');
+  console.log('    PUT  /api/v1/candidates/:id - Update candidate (requires auth)');
+  console.log('    GET  /api/v1/candidates/:id/notes - Candidate notes (requires auth)');
+  console.log('    POST /api/v1/candidates/:id/notes - Create note (requires auth)');
+  console.log('    GET  /api/v1/candidates/:id/assignments - Assignment history (requires auth)');
+  console.log('    PUT  /api/v1/candidates/:id/notes/:noteId - Update note (author or admin)');
+  console.log('    DELETE /api/v1/candidates/:id/notes/:noteId - Delete note (author or admin)');
+  console.log('  Applications:');
+  console.log('    GET  /api/v1/applications - Get applications (requires auth)');
+  console.log('    POST /api/v1/applications - Create application (requires auth)');
+  console.log('  Interviews:');
+  console.log('    GET  /api/v1/interviews - Get interviews (requires auth)');
+  console.log('    POST /api/v1/interviews - Create interview (requires auth)');
+  console.log('  Assessments:');
+  console.log('    GET  /api/v1/assessments - Get assessments (requires auth)');
+  console.log('    POST /api/v1/assessments - Create assessment (requires auth)');
+  console.log('  Reports:');
+  console.log('    GET  /api/v1/reports/performance - Get performance reports (requires auth)');
+  console.log('    GET  /api/v1/reports/overview - Admin overview metrics (requires admin)');
+  console.log('    GET  /api/v1/reports/activity - Recent notes & reminders (requires admin)');
+  console.log('    GET  /api/v1/reports/application-activity - Recruiter & candidate application totals (requires admin)');
+  console.log('    GET  /api/v1/reports/leaderboard - Recruiter leaderboard (requires auth)');
+  console.log('  Notifications:');
+  console.log('    GET  /api/v1/notifications - Combined reminders & alerts (requires auth)');
+  console.log('  Alerts:');
+  console.log('    GET  /api/v1/alerts - Get alerts (requires auth)');
+  console.log('  Users (Admin only):');
+  console.log('    GET  /api/v1/users/activity - User activity (requires admin)');
+  console.log('    GET  /api/v1/users - Get users (requires admin)');
+  console.log('    POST /api/v1/users - Create user (requires admin)');
+  console.log('    PUT  /api/v1/users/:id - Update user (requires admin)');
+  console.log('    DELETE /api/v1/users/:id - Delete user (requires admin)');
+}
+
+async function startServer(options = {}) {
+  if (serverInstance) {
+    return serverInstance;
+  }
+
+  const { skipDb = defaultSkipDbSetup, port: customPort } = options;
+  const listenPort = customPort ?? port;
+  await initializeInfrastructure({ skipDb });
+
+  return new Promise((resolve, reject) => {
+    serverInstance = app
+      .listen(listenPort, () => {
+        const address = serverInstance.address();
+        const resolvedPort = typeof address === 'object' && address ? address.port : listenPort;
+        logAvailableEndpoints(resolvedPort);
+        resolve(serverInstance);
+      })
+      .on('error', (error) => {
+        serverInstance = null;
+        reject(error);
+      });
   });
 }
 
-startServer();
+async function stopServer() {
+  stopAutomationTasks();
 
-const shutdown = async () => {
-  console.log('Shutting down TeamBuilderz backend...');
   if (auditStreamClient) {
     try {
       await auditStreamClient.end();
     } catch (error) {
       console.error('Error closing audit stream:', error.message);
+    } finally {
+      auditStreamClient = null;
     }
   }
-  process.exit(0);
+
+  if (!serverInstance) {
+    return;
+  }
+
+  await new Promise((resolve, reject) => {
+    serverInstance.close((err) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+  serverInstance = null;
+}
+
+const shutdown = async () => {
+  console.log('Shutting down TeamBuilderz backend...');
+  try {
+    await stopServer();
+  } finally {
+    process.exit(0);
+  }
 };
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  });
+}
 
-
-
-
+module.exports = {
+  app,
+  startServer,
+  stopServer,
+};
