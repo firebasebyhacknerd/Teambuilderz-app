@@ -1,4 +1,4 @@
-# TeamBuilderz Application
+codex# TeamBuilderz Application
 
 TeamBuilderz is a full-stack staffing operations platform that helps recruiters and admins manage candidates, applications, interviews, assessments, and operational alerts in one place. The project is split into a Node.js/Express backend (API + automation jobs) and a Next.js frontend UI.
 

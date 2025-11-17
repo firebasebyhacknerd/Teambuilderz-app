@@ -1,0 +1,24 @@
+[debug] [2025-11-10T22:37:46.684Z] ----------------------------------------------------------------------
+[debug] [2025-11-10T22:37:46.686Z] Command:       /nix/store/ws50yvm6vzlzf7jzz6n7xh4szddrack1-nodejs-20.19.1/bin/node /nix/store/f77kilzcw5hh2gidh22k6pj8cp7pxp7h-firebase-tools-14.22.0/lib/node_modules/firebase-tools/lib/bin/firebase.js init
+[debug] [2025-11-10T22:37:46.686Z] CLI Version:   14.22.0
+[debug] [2025-11-10T22:37:46.686Z] Platform:      linux
+[debug] [2025-11-10T22:37:46.686Z] Node Version:  v20.19.1
+[debug] [2025-11-10T22:37:46.687Z] Time:          Mon Nov 10 2025 22:37:46 GMT+0000 (Coordinated Universal Time)
+[debug] [2025-11-10T22:37:46.687Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-11-10T22:37:46.691Z] Checked if tokens are valid: true, expires at: 1762817856804
+[debug] [2025-11-10T22:37:46.691Z] Checked if tokens are valid: true, expires at: 1762817856804
+[debug] [2025-11-10T22:37:46.695Z] >>> [apiv2][query] GET https://monospace-pa.googleapis.com/v1/workspaces/teambuilderz-app-04510982 [none]
+[debug] [2025-11-10T22:37:47.559Z] <<< [apiv2][status] GET https://monospace-pa.googleapis.com/v1/workspaces/teambuilderz-app-04510982 200
+[debug] [2025-11-10T22:37:47.559Z] <<< [apiv2][body] GET https://monospace-pa.googleapis.com/v1/workspaces/teambuilderz-app-04510982 {"workspaceId":"teambuilderz-app-04510982","name":"Teambuilderz App","workspaceRedirectUrl":"firebase-teambuilderz-app-1762813668414.cluster-c36dgv2kibakqwbbbsgmia3fny.cloudworkstations.dev","status":"WORKSPACE_STATUS_RUNNING","lastAccessDatetime":"2025-11-10T22:28:01.610796Z","workspaceTemplate":"WORKSPACE_TEMPLATE_BLANK_WEB","owner":"SELF","serviceAccountEmail":"msp-5750166971523734689@monospace-per-ws-sa-8.iam.gserviceaccount.com","gitRepoUrl":"https://github.com/firebasebyhacknerd/Teambuilderz-app","enableNix":true,"ownerEmail":"kunal.firebase@gmail.com","workstationAccessToken":"eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2Nsb3VkLmdvb2dsZS5jb20vd29ya3N0YXRpb25zIiwiYXVkIjoiZmlyZWJhc2UtdGVhbWJ1aWxkZXJ6LWFwcC0xNzYyODEzNjY4NDE0LmNsdXN0ZXItYzM2ZGd2MmtpYmFrcXdiYmJzZ21pYTNmbnkuY2xvdWR3b3Jrc3RhdGlvbnMuZGV2IiwiaWF0IjoxNzYyODE0MjY3LCJleHAiOjE3NjI5MDA2Njd9.ksD6pxXah87Lm_7IN1bIWa4Ft9xhjPhjdwd21U745lXSTEoCAtTbB4cwOZuIDBpvwg8U2EuSp7AAPBGmSmPGHvM8tBav8ht4GoIfEe-LQ5v7ClkVq0bDvukGmDK_Oc3HNsCUPKarqbyUo6qyLGmnigXBJHo_zrZm2tnAf1uGR-Rt5L_F0D_ccgkU3V24XQkTMXsbp8GJ2mbDSH45Ox_cg1bmn-zXK5N3OT1oQbIlLYntluxrZ2KWWpGKdp7y05OHKN2ONLzmiIaxwktxpydqS5jqPbXRb1JsYPyOf1PeXYOzaR55hM9qXW8Ls2ZNYSsN4YvnW9oSpvO_-cIvcY8bbA"}
+[info] 
+     ######## #### ########  ######## ########     ###     ######  ########
+     ##        ##  ##     ## ##       ##     ##  ##   ##  ##       ##
+     ######    ##  ########  ######   ########  #########  ######  ######
+     ##        ##  ##    ##  ##       ##     ## ##     ##       ## ##
+     ##       #### ##     ## ######## ########  ##     ##  ######  ########
+
+You're about to initialize a Firebase project in this directory:
+
+  /home/user/Teambuilderz-app
+
