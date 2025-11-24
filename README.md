@@ -1,4 +1,4 @@
-# TeamBuilderz Admin Portal
+﻿# TeamBuilderz Admin Portal
 
 TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a web application built with Next.js for the frontend and an Express.js API for the backend, using PostgreSQL as the database.
 
@@ -22,15 +22,15 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
 
 ```
 .
-├── backend/                 # Express API + automation jobs
-│   ├── package.json
-│   ├── server.js            # Main application entry point
-│   └── .env                 # Backend environment variables (sample provided)
-├── frontend/                # Next.js application
-│   ├── package.json
-│   ├── next.config.js
-│   └── .env                 # Frontend environment variables (sample provided)
-└── README.md
+â”œâ”€â”€ backend/                 # Express API + automation jobs
+â”‚   â”œâ”€â”€ package.json
+â”‚   â”œâ”€â”€ server.js            # Main application entry point
+â”‚   â””â”€â”€ .env                 # Backend environment variables (sample provided)
+â”œâ”€â”€ frontend/                # Next.js application
+â”‚   â”œâ”€â”€ package.json
+â”‚   â”œâ”€â”€ next.config.js
+â”‚   â””â”€â”€ .env                 # Frontend environment variables (sample provided)
+â””â”€â”€ README.md
 ```
 
 ---
@@ -79,7 +79,7 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
    - Optional security/env hardening toggles:
 
      ```env
-     ENFORCE_TLS=true                 # Redirect HTTP → HTTPS (requires proxy that sets X-Forwarded-Proto)
+     ENFORCE_TLS=true                 # Redirect HTTP â†’ HTTPS (requires proxy that sets X-Forwarded-Proto)
      COOKIE_SECURE=true               # Force secure cookies even outside NODE_ENV=production
      COOKIE_SAMESITE=strict           # Adjust SameSite policy if embedding in iframes
      SECRETS_FILE=./secrets/local.json# JSON file with key/value overrides (kept out of version control)
@@ -119,7 +119,7 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
    ```
 
 7. **Log in with default credentials**
-   - Define secure admin/recruiter accounts via environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.) or invite users through the Admin → Team Management page after deployment.
+   - Define secure admin/recruiter accounts via environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.) or invite users through the Admin â†’ Team Management page after deployment.
    - Default admin and recruiter users are created on initial database setup. You can log in using those credentials. For production environments, it is strongly recommended to change these default passwords immediately after the first login.
 
 ---
@@ -145,12 +145,12 @@ Admins can upload CSV files instead of entering records manually:
    ```
    - `user_email` or `user_id` must be provided for each row.
    - `attendance_date` uses `YYYY-MM-DD`.
-   - `status` ∈ `{present, half-day, absent, leave}`.
+   - `status` âˆˆ `{present, half-day, absent, leave}`.
    - `approval_status` defaults to `approved`.
-   - `leave_category` (when `status=leave`) ∈ `{cl, sl, emergency, lwp}`.
+   - `leave_category` (when `status=leave`) âˆˆ `{cl, sl, emergency, lwp}`.
    - Times are in 24-hour `HH:MM`.
    - `informed_leave` accepts yes/no/true/false.
-2. In **Admin → Attendance**, click **Dry-Run Import** to validate, then **Import CSV** to persist. You may also call the API directly:
+2. In **Admin â†’ Attendance**, click **Dry-Run Import** to validate, then **Import CSV** to persist. You may also call the API directly:
    ```
    POST /api/v1/attendance/import
    Authorization: Bearer <token>
@@ -201,7 +201,7 @@ The backend automatically ensures enums, tables, indexes, and seed users when it
 npm start --prefix backend
 ```
 
-You should see logs such as “Connected to PostgreSQL!” and “Database tables already exist. Skipping initialization.”
+You should see logs such as â€œConnected to PostgreSQL!â€ and â€œDatabase tables already exist. Skipping initialization.â€
 
 ### 5. Running the Stack
 
@@ -237,7 +237,7 @@ All services use `restart: unless-stopped`, so once Docker Desktop is running th
 On Windows you can fully automate container start-up with:
 
 1. **Enable Docker Desktop auto-start**  
-   Settings → General → ✅ _Start Docker Desktop when you log in_.
+   Settings â†’ General â†’ âœ… _Start Docker Desktop when you log in_.
 2. **Register a scheduled task that runs `docker compose up -d` after you sign in**  
    Open an elevated PowerShell prompt in the repo root and run:
    ```powershell
@@ -292,7 +292,7 @@ The compose stack includes an optional `tbz_proxy` service (nginx) that terminat
    ```bash
    docker compose up -d tbz_postgres tbz_backend tbz_frontend tbz_proxy
    ```
-3. Browse to `https://localhost` – nginx forwards `/api` calls to `tbz_backend:3001`, sets `X-Forwarded-Proto: https`, and the backend enforces TLS thanks to `ENFORCE_TLS=true`.
+3. Browse to `https://localhost` â€“ nginx forwards `/api` calls to `tbz_backend:3001`, sets `X-Forwarded-Proto: https`, and the backend enforces TLS thanks to `ENFORCE_TLS=true`.
 
 If you already have an external load balancer, reuse the nginx config under `ops/reverse-proxy/nginx.conf` as a template (ensure it forwards `X-Forwarded-Proto` and `X-Forwarded-For`).
 When you serve the frontend through the proxy, build it with `NEXT_PUBLIC_API_URL=https://localhost/api` so browser calls align with the TLS endpoint.
@@ -344,9 +344,9 @@ NODE_ENV=production npm start --prefix backend
 | Symptom                                      | Likely Cause & Fix                                                                      |
 | -------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `EADDRINUSE: address already in use :::3000` | Another process (often Docker Desktop/WSL) is using the port. Stop it or change `PORT`. |
-| `password authentication failed for user …`  | PostgreSQL user/password mismatch. Verify credentials or create the expected role.      |
-| `relation "daily_activity" does not exist`   | Schema wasn’t initialized. Re-run backend start to auto-create tables.                  |
-| Frontend “Failed to fetch” on login          | `NEXT_PUBLIC_API_URL` not pointing to reachable backend (or backend down).              |
+| `password authentication failed for user â€¦`  | PostgreSQL user/password mismatch. Verify credentials or create the expected role.      |
+| `relation "daily_activity" does not exist`   | Schema wasnâ€™t initialized. Re-run backend start to auto-create tables.                  |
+| Frontend â€œFailed to fetchâ€ on login          | `NEXT_PUBLIC_API_URL` not pointing to reachable backend (or backend down).              |
 | Blank pages / build errors after updates     | Clear `.next/` (`rimraf frontend/.next`) and rebuild.                                   |
 
 ---
@@ -382,4 +382,37 @@ If you encounter setup issues:
 - Check server logs in the backend terminal.
 - Reach out to the TeamBuilderz engineering channel with log excerpts and steps taken.
 
-Happy building! 🚀
+Happy building! ðŸš€
+---
+
+## Project Snapshot (rolled up from removed docs)
+
+- Implemented highlights: audit logging (API + UI), command palette (Cmd+K), Kanban board, advanced filters/tables, analytics dashboard, realtime notifications, offline/service worker, PDF export, CSV import for attendance, 2FA (TOTP/SMS), breadcrumbs, enhanced empty/error states.
+- Frontend: Next.js 14, Tailwind UI components, responsive layouts; dark mode/a11y polish tagged “ready” but optional.
+- Backend: Express + Postgres with JWT auth; schema covers users, candidates, applications, interviews, assessments, notes, reminders, alerts, attendance_entries, audit_logs.
+- Optional dependency: puppeteer is not installed in the backend image—PDF endpoints return a text placeholder unless you add it (`npm i puppeteer` in backend and rebuild).
+
+### Deploy/Operate checklist
+
+- Tests/builds: `npm run build --prefix backend` (runs Jest) and `npm run build --prefix frontend`.
+- Local stack: `docker compose up -d tbz_postgres tbz_backend tbz_frontend` (proxy optional). Backend reads DB creds from `.env`/`secrets/backend.local.json`.
+- DB setup: migrations in `backend/migrations/`; audit table lives in `create_audit_logs_table.sql`. Backend also bootstraps tables on start.
+- Env essentials: `BACKEND_PORT`, DB creds, `JWT_SECRET`, `CORS_ORIGIN`; frontend `NEXT_PUBLIC_API_URL`.
+- Production: `npm run build --prefix frontend && npm start --prefix frontend`; backend `NODE_ENV=production npm start --prefix backend`.
+
+### PDF export notes
+
+- Routes: `POST /api/v1/pdf/attendance`, `/candidates`, `/applications`, `/interviews`, `/performance`, `/custom`.
+- Attendance queries `attendance_entries`; applications use `application_date`; interviews use `scheduled_date`.
+- Install puppeteer for real PDFs; otherwise a placeholder buffer is returned.
+
+### Audit logging
+
+- API router: `backend/routes/auditRoutes.js`; migration: `backend/migrations/create_audit_logs_table.sql`.
+- Frontend viewer: `frontend/components/AuditLogs.jsx` (filters, pagination, CSV/JSON export).
+
+### Maintenance reminders
+
+- If exports or schema queries fail, verify column names match the tables above (earlier docs referenced legacy names).
+- Dark mode/responsive/a11y improvements were planned; align with your design system before shipping if needed.
+
