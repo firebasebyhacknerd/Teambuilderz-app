@@ -8,6 +8,7 @@ import PDFExportButton from '../../components/ui/pdf-export-button';
 import PDFExportPanel from '../../components/ui/pdf-export-panel';
 import { DashboardLayout } from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const PerformancePage = () => {
   const router = useRouter();
@@ -63,15 +64,6 @@ const PerformancePage = () => {
     fetchPerformanceData();
   }, [token]);
 
-  const getAdminSidebarLinks = () => [
-    { href: '/admin', label: 'Dashboard', icon: TrendingUp },
-    { href: '/admin/candidates', label: 'Candidates', icon: Users },
-    { href: '/admin/attendance', label: 'Attendance', icon: Calendar },
-    { href: '/admin/performance', label: 'Performance', icon: BarChart3 },
-    { href: '/admin/reports', label: 'Reports', icon: Download },
-    { href: '/alerts', label: 'Alerts', icon: Activity },
-  ];
-
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('userName');
@@ -107,7 +99,7 @@ const PerformancePage = () => {
     <DashboardLayout
       title="Performance Analytics"
       subtitle="Recruiter performance metrics and conversion rates"
-      links={getAdminSidebarLinks()}
+      links={getSidebarLinks('Admin')}
       actions={
         <div className="flex gap-2">
           <PDFExportButton

@@ -33,6 +33,7 @@ import {
   useSubmitAttendanceMutation,
 } from '../../lib/queryHooks';
 import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../../lib/refreshBus';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const DAILY_TARGET = 60;
 const numberFormatter = new Intl.NumberFormat();
@@ -533,14 +534,7 @@ const RecruiterDashboard = () => {
     router.push('/login');
   };
 
-  const sidebarLinks = [
-    { href: '/recruiter', label: 'Dashboard', icon: Home },
-    { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-    { href: '/profile', label: 'My Profile', icon: CircleUser },
-  ];
+  const sidebarLinks = getSidebarLinks(userRole);
 
   if (loading || metricsLoading) {
     return (

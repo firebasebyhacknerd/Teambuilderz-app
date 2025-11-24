@@ -35,7 +35,7 @@ import {
 } from '../../lib/queryHooks';
 import API_URL from '../../lib/api';
 import { formatLabel } from '../../lib/formatting';
-import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 import { emitRefresh, useRefreshListener, REFRESH_CHANNELS } from '../../lib/refreshBus';
 
 const numberFormatter = new Intl.NumberFormat();
@@ -652,7 +652,7 @@ const applicationsTodayDetails = (
     [pendingRecruiterId, refetchActivity, refetchOverview, selectedApprovals, token],
   );
 
-  const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
+  const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
 
   if (isLoading) {
     return (

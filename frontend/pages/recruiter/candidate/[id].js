@@ -43,15 +43,10 @@ import {
   useApproveInterviewMutation,
   useApproveAssessmentMutation,
 } from '../../../lib/queryHooks';
+import { getSidebarLinks } from '../../../lib/sidebarLinks';
 
-const sidebarLinks = [
-  { href: '/recruiter', label: 'Dashboard', icon: Home },
-  { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
-  { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-  { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-  { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-  { href: '/profile', label: 'My Profile', icon: CircleUser }
-];
+const INTERVIEW_STATUSES = ['scheduled', 'completed', 'feedback_pending', 'advanced', 'rejected'];
+const ASSESSMENT_STATUSES = ['assigned', 'submitted', 'passed', 'failed', 'waived'];
 
 const stageBadges = {
   onboarding: 'bg-blue-100 text-blue-800',
@@ -62,15 +57,14 @@ const stageBadges = {
   inactive: 'bg-gray-100 text-gray-800'
 };
 
-const INTERVIEW_STATUSES = ['scheduled', 'completed', 'feedback_pending', 'advanced', 'rejected'];
-const ASSESSMENT_STATUSES = ['assigned', 'submitted', 'passed', 'failed', 'waived'];
-
 const CandidateDetailPage = () => {
   const router = useRouter();
   const { id } = router.query;
   const queryClient = useQueryClient();
   const [token, setToken] = useState('');
   const [currentUserRole, setCurrentUserRole] = useState('');
+  
+  const sidebarLinks = getSidebarLinks(currentUserRole);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [noteContent, setNoteContent] = useState('');
   const [noteIsPrivate, setNoteIsPrivate] = useState(false);

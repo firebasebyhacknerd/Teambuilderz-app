@@ -8,6 +8,7 @@ import PDFExportButton from '../../components/ui/pdf-export-button';
 import useAuthState from '../../lib/useAuthState';
 import API_URL from '../../lib/api';
 import { useCandidatesQuery } from '../../lib/queryHooks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const CandidatesKanbanPage = () => {
   const router = useRouter();
@@ -33,13 +34,7 @@ const CandidatesKanbanPage = () => {
   };
 
   // Sidebar links
-  const sidebarLinks = [
-    { href: '/recruiter', label: 'Dashboard', icon: Home },
-    { href: '/recruiter/candidates', label: 'Candidates (List)', icon: Users },
-    { href: '/recruiter/candidates-kanban', label: 'Candidates (Kanban)', icon: Users },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/profile', label: 'My Profile', icon: CircleUser },
-  ];
+  const sidebarLinks = getSidebarLinks(userRole);
 
   // Handle candidate move
   const handleCandidateMove = useCallback(

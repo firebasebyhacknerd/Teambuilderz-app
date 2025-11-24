@@ -62,8 +62,8 @@ const DashboardLayout = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const sidebarWidth = sidebarCollapsed ? "w-20" : "w-72";
-  const mainOffset = sidebarCollapsed ? "lg:ml-20" : "lg:ml-72";
+  const sidebarWidth = sidebarCollapsed ? "w-16 md:w-20" : "w-64 md:w-72";
+  const mainOffset = sidebarCollapsed ? "lg:ml-16 xl:ml-20" : "lg:ml-64 xl:ml-72";
 
   const defaultQuickActions = useMemo(() => {
     if (router.pathname.startsWith("/admin")) {
@@ -133,7 +133,8 @@ const DashboardLayout = ({
   const renderedLinks = useMemo(
     () =>
       links.map(({ href, label, icon: Icon }) => {
-        const isActive = router.pathname === href || router.pathname.startsWith(`${href}/`);
+        const isActive = router.pathname === href || 
+          (href !== '/' && router.pathname.startsWith(`${href}/`));
         return (
           <Link
             key={href}
@@ -180,15 +181,28 @@ const DashboardLayout = ({
         Skip to main content
       </a>
       <aside
-        className={`fixed inset-y-0 left-0 z-30 ${sidebarWidth} bg-card border-r border-border shadow-lg transform transition-all duration-200 ease-in-out lg:translate-x-0 ${
-          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        className={`fixed inset-y-0 left-0 z-30 ${sidebarWidth} bg-card border-r border-border shadow-lg transform transition-all duration-200 ease-in-out md:translate-x-0 ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         }`}
       >
         <div className="h-full flex flex-col overflow-y-auto">
           <div className={`px-4 py-5 border-b border-border flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"} gap-3`}>
             <div className="flex items-center gap-3">
               <div className="relative h-12 w-12 rounded-xl bg-secondary/60 flex items-center justify-center ring-2 ring-primary/20">
-                <Image src="/logo.svg" alt="TeamBuilderz logo" width={42} height={42} priority />
+                <Image 
+                  src="/logo.svg" 
+                  alt="TeamBuilderz logo" 
+                  width={42} 
+                  height={42} 
+                  priority 
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center" style={{ display: 'none' }}>
+                  <span className="text-lg font-bold text-primary">TB</span>
+                </div>
               </div>
               {!sidebarCollapsed && (
                 <div>
@@ -201,7 +215,7 @@ const DashboardLayout = ({
               <Button
                 variant="ghost"
                 size="icon"
-                className="hidden lg:flex"
+                className="hidden md:flex"
                 onClick={() => setSidebarCollapsed((prev) => !prev)}
                 aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"}
               >

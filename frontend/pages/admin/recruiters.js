@@ -31,7 +31,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from '../../components/ui/dialog';
-import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const AdminRecruitersPage = () => {
   const router = useRouter();
@@ -262,7 +262,7 @@ const recruiters = useMemo(
     router.push('/login');
   };
 
-const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
+const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
 
 const isMutating = updateUser.isPending || deleteUser.isPending;
 const isCreateMutating = createUser.isPending;

@@ -6,26 +6,7 @@ import { Card } from '../../../components/ui/card';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { useRecruiterProfileQuery } from '../../../lib/queryHooks';
-
-const buildSidebarLinks = (role) => {
-  if (role === 'Admin') {
-    return [
-      { href: '/admin', label: 'Dashboard', icon: Users },
-      { href: '/admin/candidates', label: 'Candidates', icon: User },
-      { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-      { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-      { href: '/profile', label: 'My Profile', icon: CircleUser },
-    ];
-  }
-
-  return [
-    { href: '/recruiter', label: 'Dashboard', icon: Target },
-    { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
-    { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-    { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-    { href: '/profile', label: 'My Profile', icon: CircleUser },
-  ];
-};
+import { getSidebarLinks } from '../../../lib/sidebarLinks';
 
 const stageLabels = {
   onboarding: 'Onboarding',
@@ -129,7 +110,7 @@ const RecruiterProfilePage = () => {
     error,
   } = useRecruiterProfileQuery(token, recruiterId, profileParams, Boolean(token && recruiterId));
 
-  const sidebarLinks = useMemo(() => buildSidebarLinks(userRole), [userRole]);
+  const sidebarLinks = useMemo(() => getSidebarLinks(userRole), [userRole]);
 
   const isBusy = isLoading || isFetching;
   const assignedCandidatesData = profileData?.assignedCandidates ?? { items: [], hasMore: false };

@@ -36,6 +36,7 @@ import {
   useDeleteApplicationMutation,
 } from '../../lib/queryHooks';
 import { formatDate, formatDateTime, formatLabel } from '../../lib/formatting';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const STATUS_OPTIONS = ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'];
 const STATUS_DETAILS = {
@@ -246,26 +247,7 @@ const ApplicationsPage = () => {
     [statusSummary],
   );
 
-  const sidebarLinks = useMemo(() => {
-    if (userRole === 'Admin') {
-      return [
-        { href: '/admin', label: 'Dashboard', icon: Home },
-        { href: '/admin/candidates', label: 'Candidates', icon: Users },
-        { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
-        { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-        { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-        { href: '/profile', label: 'My Profile', icon: CircleUser },
-      ];
-    }
-
-    return [
-      { href: '/recruiter', label: 'Dashboard', icon: Home },
-      { href: '/recruiter/candidates', label: 'Candidates', icon: Users },
-      { href: '/recruiter/applications', label: 'Applications', icon: FileText },
-      { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
-      { href: '/profile', label: 'My Profile', icon: CircleUser },
-    ];
-  }, [userRole]);
+  const sidebarLinks = useMemo(() => getSidebarLinks(userRole), [userRole]);
 
   const handleLogout = async () => {
     try {

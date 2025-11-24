@@ -35,15 +35,15 @@ const requireAdmin = (req, res, next) => {
  */
 router.post('/log', authenticateToken, async (req, res) => {
   try {
-    const { action, resourceType, resourceId, changes, metadata } = req.body;
+    const { action, tableName, recordId, oldValues, newValues } = req.body;
     const userId = req.headers['x-user-id'];
     const ipAddress = req.ip;
     const userAgent = req.headers['user-agent'];
 
     const query = `
       INSERT INTO audit_logs (
-        user_id, action, resource_type, resource_id, 
-        changes, ip_address, user_agent, metadata, created_at
+        user_id, action, table_name, record_id, 
+        old_values, new_values, ip_address, user_agent, created_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
       RETURNING *;
     `;
@@ -51,12 +51,12 @@ router.post('/log', authenticateToken, async (req, res) => {
     const result = await pool.query(query, [
       userId,
       action,
-      resourceType,
-      resourceId,
-      JSON.stringify(changes),
+      tableName,
+      recordId,
+      JSON.stringify(oldValues || null),
+      JSON.stringify(newValues || null),
       ipAddress,
       userAgent,
-      JSON.stringify(metadata),
     ]);
 
     res.status(201).json({
@@ -102,7 +102,7 @@ router.get('/logs', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     if (resourceType) {
-      query += ` AND resource_type = $${paramCount}`;
+      query += ` AND table_name = $${paramCount}`;
       params.push(resourceType);
       paramCount++;
     }
@@ -142,7 +142,7 @@ router.get('/logs', authenticateToken, requireAdmin, async (req, res) => {
     }
 
     if (resourceType) {
-      countQuery += ` AND resource_type = $${countParamCount}`;
+      countQuery += ` AND table_name = $${countParamCount}`;
       countParams.push(resourceType);
       countParamCount++;
     }
@@ -188,8 +188,8 @@ router.get('/user/:userId/activity', authenticateToken, requireAdmin, async (req
 
     const query = `
       SELECT 
-        id, action, resource_type, resource_id, 
-        changes, created_at, ip_address
+        id, action, table_name, record_id, 
+        old_values, new_values, created_at, ip_address
       FROM audit_logs
       WHERE user_id = $1
       ORDER BY created_at DESC
@@ -236,12 +236,12 @@ router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
 
     const actionsResult = await pool.query(actionsQuery, params);
 
-    // Get resource type counts
+    // Get table name counts
     const resourcesQuery = `
-      SELECT resource_type, COUNT(*) as count
+      SELECT table_name, COUNT(*) as count
       FROM audit_logs
       ${dateFilter}
-      GROUP BY resource_type
+      GROUP BY table_name
       ORDER BY count DESC;
     `;
 
