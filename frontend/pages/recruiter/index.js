@@ -22,6 +22,8 @@ import {
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
 import {
@@ -49,6 +51,26 @@ const humanize = (value) => {
     .join(' ');
 };
 
+const formatDuration = (minutes) => {
+  if (minutes === null || minutes === undefined) {
+    return '';
+  }
+  const absolute = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(absolute / 60);
+  const mins = absolute % 60;
+  const parts = [];
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (mins > 0) {
+    parts.push(`${mins}m`);
+  }
+  if (parts.length === 0) {
+    return '0m';
+  }
+  return parts.join(' ');
+};
+
 const attendanceStatusTone = {
   present: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
   'half-day': 'bg-amber-50 text-amber-800 border border-amber-200',
@@ -64,6 +86,19 @@ const attendanceStatusOptions = [
   { value: 'leave', label: 'Leave', desc: 'Planned', icon: Plane, tone: 'text-blue-700' },
   { value: 'absent', label: 'Absent', desc: 'Unplanned', icon: Ban, tone: 'text-rose-700' },
 ];
+
+const leaveCategoryOptions = [
+  { value: 'cl', label: 'Casual Leave (CL)' },
+  { value: 'sl', label: 'Sick Leave (SL)' },
+  { value: 'emergency', label: 'Emergency Leave' },
+  { value: 'lwp', label: 'Loss of Pay (LWP)' },
+];
+
+const HALF_DAY_REASON_LABELS = {
+  'late-login': 'Late login past 8:00 PM IST',
+  'early-logout': 'Logged out more than 2 hours before shift end',
+  'reported-half-day': 'Half-day reported',
+};
 
 const RecruiterDashboard = () => {
   const router = useRouter();
@@ -82,6 +117,11 @@ const RecruiterDashboard = () => {
     return start.toISOString().split('T')[0];
   }, []);
   const [attendanceMessage, setAttendanceMessage] = useState(null);
+  const [checkInTime, setCheckInTime] = useState('');
+  const [checkOutTime, setCheckOutTime] = useState('');
+  const [breakMinutes, setBreakMinutes] = useState('45');
+  const [informedLeave, setInformedLeave] = useState(false);
+  const [leaveCategory, setLeaveCategory] = useState('');
 
   const totalAppsToday = useMemo(
     () => candidates.reduce((sum, c) => sum + parseInt(c.daily_applications || 0, 10), 0),
@@ -238,9 +278,55 @@ const RecruiterDashboard = () => {
     return attendanceData.days.find((day) => day.date === todayIso) || null;
   }, [attendanceData, todayIso]);
 
+  useEffect(() => {
+    if (!todayAttendance) {
+      setCheckInTime('');
+      setCheckOutTime('');
+      setBreakMinutes('45');
+      setInformedLeave(false);
+      setLeaveCategory('');
+      return;
+    }
+    setCheckInTime(todayAttendance.checkInTime || '');
+    setCheckOutTime(todayAttendance.checkOutTime || '');
+    setBreakMinutes(
+      todayAttendance.breakMinutes === null || todayAttendance.breakMinutes === undefined
+        ? '45'
+        : String(todayAttendance.breakMinutes),
+    );
+    setInformedLeave(Boolean(todayAttendance.informedLeave));
+    setLeaveCategory(todayAttendance.leaveCategory || '');
+  }, [todayAttendance]);
+
   const attendanceEffective = todayAttendance?.effectiveStatus ?? 'unmarked';
   const attendanceApproval = todayAttendance?.approvalStatus ?? (todayAttendance ? 'pending' : 'not-submitted');
   const attendanceDisplayStatus = attendanceEffective === 'unmarked' ? 'not-submitted' : attendanceEffective;
+  const policyImpact = todayAttendance?.policyImpact ?? null;
+  const policyWarnings = useMemo(() => {
+    if (!policyImpact) {
+      return [];
+    }
+    const warnings = [];
+    if (policyImpact.lateLoginMinutes) {
+      warnings.push(`Late login by ${formatDuration(policyImpact.lateLoginMinutes)}.`);
+    }
+    if (policyImpact.earlyLogoutMinutes) {
+      warnings.push(`Early logout by ${formatDuration(policyImpact.earlyLogoutMinutes)}.`);
+    }
+    if (policyImpact.breakOverMinutes) {
+      warnings.push(`Break exceeded by ${formatDuration(policyImpact.breakOverMinutes)}.`);
+    }
+    if (policyImpact.uninformedLeave) {
+      warnings.push('Uninformed leave recorded. Full-day deduction applies.');
+    }
+    if (policyImpact.halfDay && policyImpact.halfDayReasons?.length) {
+      const reasonText = policyImpact.halfDayReasons
+        .map((reason) => HALF_DAY_REASON_LABELS[reason] || humanize(reason))
+        .join(', ');
+      warnings.push(`Half-day counted (${reasonText}).`);
+    }
+    return warnings;
+  }, [policyImpact]);
   const isApprovedFullPresent =
     Boolean(todayAttendance) &&
     todayAttendance.effectiveStatus === 'present' &&
@@ -254,6 +340,18 @@ const RecruiterDashboard = () => {
     }
     if (todayAttendance.approvalStatus === 'sandwich') {
       return 'Weekend counted as leave because Friday and Monday are approved absences.';
+    }
+    if (policyImpact?.halfDay && policyImpact?.halfDayReasons?.length) {
+      const reasonText = policyImpact.halfDayReasons
+        .map((reason) => HALF_DAY_REASON_LABELS[reason] || humanize(reason))
+        .join(', ');
+      return `Company policy marked this as a half-day (${reasonText}).`;
+    }
+    if (policyImpact?.lateLoginMinutes || policyImpact?.earlyLogoutMinutes) {
+      return 'Shift timing breach detected. Admin will review your submission.';
+    }
+    if (policyImpact?.uninformedLeave) {
+      return 'Marked as uninformed leave. HR will review for salary deduction.';
     }
     if (todayAttendance.approvalStatus === 'pending') {
       if (todayAttendance.reportedStatus === 'half-day') {
@@ -274,16 +372,34 @@ const RecruiterDashboard = () => {
       return 'Submission rejected. Submit again if you were present.';
     }
     return 'Attendance requires attention.';
-  }, [todayAttendance]);
-  const submitAttendanceDisabled = submitAttendance.isPending || isApprovedFullPresent;
+  }, [todayAttendance, policyImpact]);
+  const requiresShiftTimes = attendanceStatus === 'present' || attendanceStatus === 'half-day';
+  const requiresLeaveType = attendanceStatus === 'leave';
+  const leaveRequiresNotice = attendanceStatus === 'leave' || attendanceStatus === 'absent';
+  const timingInputsIncomplete = requiresShiftTimes && (!checkInTime || !checkOutTime);
+  const missingLeaveType = requiresLeaveType && !leaveCategory;
+  const submitAttendanceDisabled =
+    submitAttendance.isPending || isApprovedFullPresent || timingInputsIncomplete || missingLeaveType;
 
   const handleAttendanceSubmit = () => {
     setAttendanceMessage(null);
+    const payload = {
+      attendance_date: todayIso,
+      status: attendanceStatus,
+    };
+    if (requiresShiftTimes) {
+      payload.check_in_time = checkInTime;
+      payload.check_out_time = checkOutTime;
+      payload.break_minutes = Math.max(0, parseInt(breakMinutes || '0', 10));
+    }
+    if (requiresLeaveType) {
+      payload.leave_category = leaveCategory;
+    }
+    if (leaveRequiresNotice) {
+      payload.informed_leave = informedLeave;
+    }
     submitAttendance.mutate(
-      {
-        attendance_date: todayIso,
-        status: attendanceStatus,
-      },
+      payload,
       {
         onSuccess: () => {
           setAttendanceMessage({
@@ -548,6 +664,114 @@ const RecruiterDashboard = () => {
               })}
             </div>
           </div>
+          {requiresShiftTimes ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="attendance-check-in" className="text-xs text-muted-foreground font-medium">
+                  Check-in (IST)
+                </Label>
+                <Input
+                  id="attendance-check-in"
+                  type="time"
+                  value={checkInTime}
+                  onChange={(event) => setCheckInTime(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="attendance-check-out" className="text-xs text-muted-foreground font-medium">
+                  Check-out (IST)
+                </Label>
+                <Input
+                  id="attendance-check-out"
+                  type="time"
+                  value={checkOutTime}
+                  onChange={(event) => setCheckOutTime(event.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="attendance-break" className="text-xs text-muted-foreground font-medium">
+                  Break minutes (max 45)
+                </Label>
+                <Input
+                  id="attendance-break"
+                  type="number"
+                  min={0}
+                  max={240}
+                  value={breakMinutes}
+                  onChange={(event) => setBreakMinutes(event.target.value)}
+                />
+              </div>
+            </div>
+          ) : null}
+          {leaveRequiresNotice ? (
+            <div className="space-y-3 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 p-3">
+              {requiresLeaveType ? (
+                <div className="space-y-1">
+                  <Label htmlFor="attendance-leave-type" className="text-xs text-muted-foreground font-medium">
+                    Leave type
+                  </Label>
+                  <select
+                    id="attendance-leave-type"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    value={leaveCategory}
+                    onChange={(event) => setLeaveCategory(event.target.value)}
+                  >
+                    <option value="">Select leave type</option>
+                    {leaveCategoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={informedLeave}
+                  onChange={(event) => setInformedLeave(event.target.checked)}
+                  className="h-4 w-4 rounded border border-border text-primary focus:ring-primary/40"
+                />
+                I informed HR / Reporting Manager before the shift
+              </label>
+            </div>
+          ) : null}
+          {policyImpact ? (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Shift summary</span>
+                {policyWarnings.length ? (
+                  <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                    Policy alert
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                    Compliant
+                  </Badge>
+                )}
+              </div>
+              <div className="text-sm text-foreground">
+                {policyImpact.checkInTime || '—'} → {policyImpact.checkOutTime || '—'}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {policyImpact.workingMinutes
+                    ? `${formatDuration(policyImpact.workingMinutes)} logged`
+                    : 'Add both times to compute hours'}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Break used: {policyImpact.breakMinutes ?? 0}m (45m allowance)
+              </p>
+              {policyWarnings.length ? (
+                <ul className="list-disc space-y-1 pl-5 text-xs text-rose-600">
+                  {policyWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-emerald-600">All attendance rules satisfied.</p>
+              )}
+            </div>
+          ) : null}
           <Button className="w-full" onClick={handleAttendanceSubmit} disabled={submitAttendanceDisabled}>
             {submitAttendance.isPending ? 'Submitting.' : 'Submit attendance'}
           </Button>

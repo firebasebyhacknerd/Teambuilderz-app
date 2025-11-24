@@ -49,6 +49,39 @@ const statusTone = {
   sandwich: 'bg-purple-100 text-purple-800 border border-purple-200',
 };
 
+const leaveCategoryLabels = {
+  cl: 'Casual Leave (CL)',
+  sl: 'Sick Leave (SL)',
+  emergency: 'Emergency Leave',
+  lwp: 'Loss of Pay (LWP)',
+};
+
+const halfDayReasonLabels = {
+  'late-login': 'Late login past 8 PM',
+  'early-logout': 'Early logout (>2h early)',
+  'reported-half-day': 'Manual half-day',
+};
+
+const formatDuration = (minutes) => {
+  if (minutes === null || minutes === undefined) {
+    return '';
+  }
+  const absolute = Math.max(0, Math.floor(minutes));
+  const hours = Math.floor(absolute / 60);
+  const mins = absolute % 60;
+  const parts = [];
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+  if (mins > 0) {
+    parts.push(`${mins}m`);
+  }
+  if (parts.length === 0) {
+    return '0m';
+  }
+  return parts.join(' ');
+};
+
 const effectiveStatusFromRecord = (record) => {
   if (!record) {
     return 'pending';
@@ -158,6 +191,11 @@ const AdminAttendancePage = () => {
     date: todayIso,
     status: 'absent',
     note: '',
+    checkInTime: '',
+    checkOutTime: '',
+    breakMinutes: '45',
+    leaveCategory: '',
+    informed: false,
   });
 
   const handleCreateEntry = (event) => {
@@ -166,13 +204,26 @@ const AdminAttendancePage = () => {
       setActionMessage({ type: 'error', text: 'Select a recruiter before creating an entry.' });
       return;
     }
-    submitAttendance.mutate({
+    const requiresTimes = newEntry.status === 'present' || newEntry.status === 'half-day';
+    const payload = {
       user_id: Number(newEntry.userId),
       attendance_date: newEntry.date,
       status: newEntry.status,
       approval_status: 'approved',
       reviewer_note: newEntry.note || null,
-    });
+    };
+    if (requiresTimes) {
+      payload.check_in_time = newEntry.checkInTime || null;
+      payload.check_out_time = newEntry.checkOutTime || null;
+      payload.break_minutes = Math.max(0, parseInt(newEntry.breakMinutes || '0', 10));
+    }
+    if (newEntry.status === 'leave') {
+      payload.leave_category = newEntry.leaveCategory || null;
+    }
+    if (newEntry.status === 'leave' || newEntry.status === 'absent') {
+      payload.informed_leave = newEntry.informed;
+    }
+    submitAttendance.mutate(payload);
   };
 
   const handleUpdate = (recordId, payload) => {
@@ -192,6 +243,13 @@ const AdminAttendancePage = () => {
     pending: 0,
     autoPresent: 0,
     sandwichAbsent: 0,
+  };
+  const policySummary = summary.policy ?? {
+    halfDays: 0,
+    uninformedLeaves: 0,
+    leaveDeductionsFromHalfDays: 0,
+    remainingHalfDays: 0,
+    totalDeductionDays: 0,
   };
 
   const records = useMemo(() => attendanceData?.records ?? [], [attendanceData]);
@@ -354,6 +412,28 @@ const AdminAttendancePage = () => {
               value={summary.autoPresent}
               accent="bg-slate-100 text-slate-700"
             />
+            <SummaryStat
+              icon={<Clock className="h-4 w-4 text-indigo-600" />}
+              label="Half-Day Infractions"
+              value={policySummary.halfDays}
+              accent="bg-indigo-50 text-indigo-900"
+              meta={
+                policySummary.leaveDeductionsFromHalfDays > 0
+                  ? `${policySummary.leaveDeductionsFromHalfDays} full-day deduction`
+                  : null
+              }
+            />
+            <SummaryStat
+              icon={<XCircle className="h-4 w-4 text-rose-600" />}
+              label="Uninformed Leaves"
+              value={policySummary.uninformedLeaves}
+              accent="bg-rose-50 text-rose-900"
+              meta={
+                policySummary.totalDeductionDays > 0
+                  ? `${policySummary.totalDeductionDays} total deduction days`
+                  : null
+              }
+            />
           </div>
         </Card>
 
@@ -378,6 +458,8 @@ const AdminAttendancePage = () => {
                   <th className="px-4 py-2 text-left">Submitted</th>
                   <th className="px-4 py-2 text-left">Approval</th>
                   <th className="px-4 py-2 text-left">Effective</th>
+                  <th className="px-4 py-2 text-left">Shift &amp; Leave</th>
+                  <th className="px-4 py-2 text-left">Policy Flags</th>
                   <th className="px-4 py-2 text-left">Note</th>
                   <th className="px-4 py-2 text-left">Actions</th>
                 </tr>
@@ -385,7 +467,7 @@ const AdminAttendancePage = () => {
               <tbody>
                 {records.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-6 text-center text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">
                       No attendance submissions for the selected filters.
                     </td>
                   </tr>
@@ -393,6 +475,24 @@ const AdminAttendancePage = () => {
                   records.map((record) => {
                     const effective = effectiveStatusFromRecord(record);
                     const isRowBusy = isUpdating && pendingUpdateId === record.id;
+                    const policyImpact = record.policyImpact ?? null;
+                    const shiftLabel =
+                      record.checkInTime && record.checkOutTime
+                        ? `${record.checkInTime} → ${record.checkOutTime}`
+                        : 'No timings';
+                    const leaveLabel = record.leaveCategory
+                      ? leaveCategoryLabels[record.leaveCategory] || record.leaveCategory.toUpperCase()
+                      : null;
+                    const policyReasons =
+                      policyImpact?.halfDayReasons?.length
+                        ? policyImpact.halfDayReasons.map((reason) => halfDayReasonLabels[reason] || reason)
+                        : [];
+                    const policyHasFlags =
+                      (policyImpact?.lateLoginMinutes ?? 0) > 0 ||
+                      (policyImpact?.earlyLogoutMinutes ?? 0) > 0 ||
+                      (policyImpact?.breakOverMinutes ?? 0) > 0 ||
+                      policyImpact?.halfDay ||
+                      policyImpact?.uninformedLeave;
                     return (
                       <tr key={record.id} className="border-t border-border/70">
                         <td className="px-4 py-3 font-medium text-foreground">{record.date}</td>
@@ -419,6 +519,61 @@ const AdminAttendancePage = () => {
                           >
                             {effective}
                           </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          <div className="space-y-1">
+                            <div className="text-sm text-foreground">{shiftLabel}</div>
+                            <div>
+                              Break: {record.breakMinutes ?? 0}m
+                              {policyImpact?.workingMinutes
+                                ? ` • ${formatDuration(policyImpact.workingMinutes)} logged`
+                                : null}
+                            </div>
+                            <div>
+                              {leaveLabel ? `${leaveLabel} • ` : ''}
+                              {record.informedLeave ? 'Informed' : 'Uninformed'}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {policyImpact ? (
+                            policyHasFlags ? (
+                              <div className="flex flex-wrap gap-1 text-xs">
+                                {policyImpact.lateLoginMinutes ? (
+                                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                    Late +{formatDuration(policyImpact.lateLoginMinutes)}
+                                  </Badge>
+                                ) : null}
+                                {policyImpact.earlyLogoutMinutes ? (
+                                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                    Early -{formatDuration(policyImpact.earlyLogoutMinutes)}
+                                  </Badge>
+                                ) : null}
+                                {policyImpact.breakOverMinutes ? (
+                                  <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+                                    Break +{formatDuration(policyImpact.breakOverMinutes)}
+                                  </Badge>
+                                ) : null}
+                                {policyImpact.halfDay ? (
+                                  <Badge variant="outline" className="border-purple-200 bg-purple-50 text-purple-800">
+                                    Half-day
+                                  </Badge>
+                                ) : null}
+                                {policyReasons.length > 0 ? (
+                                  <span className="text-[11px] text-muted-foreground">{policyReasons.join(', ')}</span>
+                                ) : null}
+                                {policyImpact.uninformedLeave ? (
+                                  <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-800">
+                                    Uninformed leave
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">No policy flags</span>
+                            )
+                          ) : (
+                            <span className="text-xs text-muted-foreground">No policy data</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 max-w-[200px]">
                           {record.reviewerNote ? (
@@ -565,6 +720,69 @@ const AdminAttendancePage = () => {
                 onChange={(event) => setNewEntry((prev) => ({ ...prev, note: event.target.value }))}
               />
             </div>
+            {(newEntry.status === 'present' || newEntry.status === 'half-day') ? (
+              <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="new-entry-checkin">Check-in (IST)</Label>
+                  <Input
+                    id="new-entry-checkin"
+                    type="time"
+                    value={newEntry.checkInTime}
+                    onChange={(event) => setNewEntry((prev) => ({ ...prev, checkInTime: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-entry-checkout">Check-out (IST)</Label>
+                  <Input
+                    id="new-entry-checkout"
+                    type="time"
+                    value={newEntry.checkOutTime}
+                    onChange={(event) => setNewEntry((prev) => ({ ...prev, checkOutTime: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-entry-break">Break minutes (max 45)</Label>
+                  <Input
+                    id="new-entry-break"
+                    type="number"
+                    min={0}
+                    max={240}
+                    value={newEntry.breakMinutes}
+                    onChange={(event) => setNewEntry((prev) => ({ ...prev, breakMinutes: event.target.value }))}
+                  />
+                </div>
+              </div>
+            ) : null}
+            {(newEntry.status === 'leave' || newEntry.status === 'absent') ? (
+              <div className="md:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {newEntry.status === 'leave' ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="new-entry-leave-type">Leave type</Label>
+                    <select
+                      id="new-entry-leave-type"
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      value={newEntry.leaveCategory}
+                      onChange={(event) => setNewEntry((prev) => ({ ...prev, leaveCategory: event.target.value }))}
+                    >
+                      <option value="">Select leave type</option>
+                      <option value="cl">Casual Leave (CL)</option>
+                      <option value="sl">Sick Leave (SL)</option>
+                      <option value="emergency">Emergency Leave</option>
+                      <option value="lwp">Loss of Pay (LWP)</option>
+                    </select>
+                  </div>
+                ) : null}
+                <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={newEntry.informed}
+                    onChange={(event) => setNewEntry((prev) => ({ ...prev, informed: event.target.checked }))}
+                    className="h-4 w-4 rounded border border-border text-primary focus:ring-primary/40"
+                  />
+                  Informed HR / reporting manager before shift
+                </label>
+              </div>
+            ) : null}
             <div className="md:col-span-4 flex items-center justify-end">
               <Button
                 type="submit"
@@ -587,7 +805,7 @@ const AdminAttendancePage = () => {
               Auto weekend days show as present unless converted by sandwich leave.
             </p>
             <div className="mt-4 overflow-x-auto">
-              <table className="w-full min-w-[640px] border border-border rounded-lg overflow-hidden text-sm">
+              <table className="w-full min-w-[720px] border border-border rounded-lg overflow-hidden text-sm">
                 <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 text-left">Date</th>
@@ -595,6 +813,8 @@ const AdminAttendancePage = () => {
                     <th className="px-4 py-2 text-left">Effective</th>
                     <th className="px-4 py-2 text-left">Source</th>
                     <th className="px-4 py-2 text-left">Approval</th>
+                    <th className="px-4 py-2 text-left">Shift</th>
+                    <th className="px-4 py-2 text-left">Policy</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -617,6 +837,19 @@ const AdminAttendancePage = () => {
                       </td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">
                         {day.approvalStatus || 'â€”'}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        {day.checkInTime && day.checkOutTime ? `${day.checkInTime} → ${day.checkOutTime}` : 'â€”'}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        {day.policyImpact
+                          ? [
+                              day.policyImpact.halfDay ? 'Half-day' : null,
+                              day.policyImpact.uninformedLeave ? 'UL' : null,
+                            ]
+                              .filter(Boolean)
+                              .join(', ') || 'None'
+                          : 'None'}
                       </td>
                     </tr>
                   ))}

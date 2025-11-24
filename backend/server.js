@@ -786,6 +786,12 @@ async function ensureAttendanceSchema(db) {
     $$;
   `);
 
+  await db.query(`ALTER TABLE attendance_entries ADD COLUMN IF NOT EXISTS check_in_time TIME WITHOUT TIME ZONE;`);
+  await db.query(`ALTER TABLE attendance_entries ADD COLUMN IF NOT EXISTS check_out_time TIME WITHOUT TIME ZONE;`);
+  await db.query(`ALTER TABLE attendance_entries ADD COLUMN IF NOT EXISTS break_minutes INTEGER DEFAULT 0;`);
+  await db.query(`ALTER TABLE attendance_entries ADD COLUMN IF NOT EXISTS informed_leave BOOLEAN DEFAULT false;`);
+  await db.query(`ALTER TABLE attendance_entries ADD COLUMN IF NOT EXISTS leave_category VARCHAR(20);`);
+
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_attendance_entries_date ON attendance_entries(attendance_date);
   `);
@@ -4533,20 +4539,178 @@ app.get('/api/v1/users/:id/profile', verifyToken, async (req, res) => {
   }
 });
 
-const mapAttendanceRow = (row) => ({
-  id: row.id,
-  userId: row.user_id,
-  userName: row.user_name,
-  date: toDateIso(row.attendance_date),
-  reportedStatus: row.reported_status,
-  approvalStatus: row.approval_status,
-  approvedBy: row.approved_by,
-  approvedByName: row.approved_by_name || null,
-  approvedAt: row.approved_at,
-  reviewerNote: row.reviewer_note,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+const SHIFT_RULES = {
+  startMinutes: 19 * 60,
+  lateCutoffMinutes: 20 * 60,
+  endMinutes: 19 * 60 + 9 * 60,
+  earlyLogoutThresholdMinutes: 19 * 60 + 9 * 60 - 120,
+  breakAllowanceMinutes: 45,
+};
+
+const TIME_WRAP_THRESHOLD_MINUTES = 6 * 60; // treat 00:00-05:59 as next day for overnight shift math
+
+const formatDbTime = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    return value.toISOString().split('T')[1].slice(0, 5);
+  }
+  if (typeof value === 'string') {
+    return value.slice(0, 5);
+  }
+  return null;
+};
+
+const toShiftMinutes = (timeValue) => {
+  if (!timeValue) {
+    return null;
+  }
+  const parts = String(timeValue).split(':');
+  const minutes = Number(parts[0]) * 60 + Number(parts[1] || 0);
+  if (Number.isNaN(minutes)) {
+    return null;
+  }
+  if (minutes < TIME_WRAP_THRESHOLD_MINUTES) {
+    return minutes + 24 * 60;
+  }
+  return minutes;
+};
+
+const normalizeBreakMinutes = (value) => {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric) || numeric < 0) {
+    return 0;
+  }
+  return numeric;
+};
+
+const normalizeShiftTimeInput = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const trimmed = String(value).trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.length > 5 ? trimmed.slice(0, 5) : trimmed;
+};
+
+const buildPolicyImpact = ({ reportedStatus, checkInTime, checkOutTime, breakMinutes, informedLeave }) => {
+  if (!reportedStatus && !checkInTime && !checkOutTime && !informedLeave && !breakMinutes) {
+    return null;
+  }
+
+  const normalizedBreak = normalizeBreakMinutes(breakMinutes);
+  const impact = {
+    checkInTime: checkInTime || null,
+    checkOutTime: checkOutTime || null,
+    breakMinutes: normalizedBreak,
+    workingMinutes: null,
+    lateLoginMinutes: 0,
+    earlyLogoutMinutes: 0,
+    breakOverMinutes: 0,
+    uninformedLeave: false,
+    halfDay: false,
+    halfDayReasons: [],
+    halfDayUnits: 0,
+    enforced: false,
+  };
+
+  const checkInMinutes = toShiftMinutes(checkInTime);
+  const checkOutMinutes = toShiftMinutes(checkOutTime);
+
+  if (checkInMinutes !== null && checkOutMinutes !== null) {
+    impact.workingMinutes = Math.max(0, checkOutMinutes - checkInMinutes - normalizedBreak);
+  }
+
+  if (checkInMinutes !== null && checkInMinutes > SHIFT_RULES.lateCutoffMinutes) {
+    impact.lateLoginMinutes = checkInMinutes - SHIFT_RULES.lateCutoffMinutes;
+    impact.halfDay = true;
+    impact.halfDayReasons.push('late-login');
+  }
+
+  if (checkOutMinutes !== null && checkOutMinutes < SHIFT_RULES.earlyLogoutThresholdMinutes) {
+    impact.earlyLogoutMinutes = SHIFT_RULES.earlyLogoutThresholdMinutes - checkOutMinutes;
+    impact.halfDay = true;
+    impact.halfDayReasons.push('early-logout');
+  }
+
+  if (normalizedBreak > SHIFT_RULES.breakAllowanceMinutes) {
+    impact.breakOverMinutes = normalizedBreak - SHIFT_RULES.breakAllowanceMinutes;
+  }
+
+  const normalizedStatus = reportedStatus || null;
+  if (normalizedStatus === 'half-day' && !impact.halfDayReasons.includes('reported-half-day')) {
+    impact.halfDay = true;
+    impact.halfDayReasons.push('reported-half-day');
+  }
+
+  if ((normalizedStatus === 'absent' || normalizedStatus === 'leave') && informedLeave !== true) {
+    impact.uninformedLeave = true;
+  }
+
+  impact.halfDayUnits = impact.halfDay ? 1 : 0;
+  return impact;
+};
+
+const parseAttendanceMeta = (row) => {
+  if (!row) {
+    return {
+      checkInTime: null,
+      checkOutTime: null,
+      breakMinutes: 0,
+      informedLeave: false,
+      leaveCategory: null,
+      policyImpact: null,
+    };
+  }
+  const checkInTime = formatDbTime(row.check_in_time);
+  const checkOutTime = formatDbTime(row.check_out_time);
+  const breakMinutes = row.break_minutes !== null && row.break_minutes !== undefined ? Number(row.break_minutes) : 0;
+  const informedLeave = row.informed_leave === true;
+  const leaveCategory = row.leave_category || null;
+  const policyImpact = buildPolicyImpact({
+    reportedStatus: row.reported_status,
+    checkInTime,
+    checkOutTime,
+    breakMinutes,
+    informedLeave,
+  });
+  return {
+    checkInTime,
+    checkOutTime,
+    breakMinutes,
+    informedLeave,
+    leaveCategory,
+    policyImpact,
+  };
+};
+
+const mapAttendanceRow = (row) => {
+  const meta = parseAttendanceMeta(row);
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    userName: row.user_name,
+    date: toDateIso(row.attendance_date),
+    reportedStatus: row.reported_status,
+    approvalStatus: row.approval_status,
+    approvedBy: row.approved_by,
+    approvedByName: row.approved_by_name || null,
+    approvedAt: row.approved_at,
+    reviewerNote: row.reviewer_note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    checkInTime: meta.checkInTime,
+    checkOutTime: meta.checkOutTime,
+    breakMinutes: meta.breakMinutes,
+    informedLeave: meta.informedLeave,
+    leaveCategory: meta.leaveCategory,
+    policyImpact: meta.policyImpact,
+  };
+};
 
 const fetchAttendanceById = async (attendanceId) => {
   const { rows } = await pool.query(
@@ -4560,6 +4724,11 @@ const fetchAttendanceById = async (attendanceId) => {
         ae.approved_by,
         ae.approved_at,
         ae.reviewer_note,
+        ae.check_in_time,
+        ae.check_out_time,
+        ae.break_minutes,
+        ae.informed_leave,
+        ae.leave_category,
         ae.created_at,
         ae.updated_at,
         u.name AS user_name,
@@ -4685,6 +4854,11 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
           ae.approved_by,
           ae.approved_at,
           ae.reviewer_note,
+          ae.check_in_time,
+          ae.check_out_time,
+          ae.break_minutes,
+          ae.informed_leave,
+          ae.leave_category,
           ae.created_at,
           ae.updated_at,
           u.name AS user_name,
@@ -4731,6 +4905,7 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
         const approvalStatus =
           row?.approval_status ??
           (source === 'auto-weekend' ? 'auto' : null);
+        const meta = parseAttendanceMeta(row);
 
         const dayRecord = {
           userId: user.id,
@@ -4748,7 +4923,24 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
           effectiveStatus,
           source,
           sandwichApplied: false,
+          checkInTime: row ? meta.checkInTime : null,
+          checkOutTime: row ? meta.checkOutTime : null,
+          breakMinutes: row ? meta.breakMinutes : null,
+          informedLeave: row ? meta.informedLeave : false,
+          leaveCategory: row ? meta.leaveCategory : null,
+          policyImpact: row ? meta.policyImpact : null,
         };
+
+        if (
+          dayRecord.policyImpact &&
+          dayRecord.policyImpact.halfDay &&
+          source !== 'auto-weekend' &&
+          dayRecord.effectiveStatus === 'present'
+        ) {
+          dayRecord.effectiveStatus = 'half-day';
+          dayRecord.policyImpact.enforced = true;
+        }
+        dayRecord.uninformedLeave = Boolean(row && dayRecord.policyImpact?.uninformedLeave);
 
         days.push(dayRecord);
         userDays.push(dayRecord);
@@ -4796,6 +4988,14 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
       }
     }
 
+    const policySummary = {
+      halfDays: 0,
+      uninformedLeaves: 0,
+      leaveDeductionsFromHalfDays: 0,
+      remainingHalfDays: 0,
+      totalDeductionDays: 0,
+    };
+
     const summary = days.reduce(
       (acc, day) => {
         if (day.effectiveStatus === 'present' && (day.approvalStatus === 'approved' || day.approvalStatus === 'auto')) {
@@ -4822,10 +5022,22 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
         if (day.effectiveStatus === 'pending' || day.effectiveStatus === 'unmarked' || day.effectiveStatus === 'rejected') {
           acc.pending += 1;
         }
+
+        if (day.policyImpact?.halfDayUnits) {
+          policySummary.halfDays += day.policyImpact.halfDayUnits;
+        }
+        if (day.policyImpact?.uninformedLeave) {
+          policySummary.uninformedLeaves += 1;
+        }
         return acc;
       },
       { present: 0, halfDay: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
     );
+
+    policySummary.leaveDeductionsFromHalfDays = Math.floor(policySummary.halfDays / 2);
+    policySummary.remainingHalfDays = policySummary.halfDays % 2;
+    policySummary.totalDeductionDays = policySummary.leaveDeductionsFromHalfDays + policySummary.uninformedLeaves;
+    summary.policy = policySummary;
 
     const pendingOnly = String(req.query?.pending_only || '').toLowerCase() === 'true';
     const allRecords = attendanceRows.map(mapAttendanceRow);
@@ -4891,6 +5103,19 @@ app.post(
         return res.status(400).json({ message: 'Unsupported attendance status.' });
       }
 
+      const checkInTime = normalizeShiftTimeInput(req.body.check_in_time);
+      const checkOutTime = normalizeShiftTimeInput(req.body.check_out_time);
+      const rawBreakMinutes =
+        req.body.break_minutes !== undefined && req.body.break_minutes !== null
+          ? Number(req.body.break_minutes)
+          : null;
+      const breakMinutes = Number.isNaN(rawBreakMinutes) ? null : rawBreakMinutes;
+      const informedLeave =
+        req.body.informed_leave === undefined ? null : Boolean(req.body.informed_leave);
+      const leaveCategory = typeof req.body.leave_category === 'string' && req.body.leave_category.trim()
+        ? req.body.leave_category.trim()
+        : null;
+
       let approvalStatus = 'pending';
       let approvedBy = null;
       let approvedAt = null;
@@ -4914,9 +5139,27 @@ app.post(
             approval_status,
             approved_by,
             approved_at,
-            reviewer_note
+            reviewer_note,
+            check_in_time,
+            check_out_time,
+            break_minutes,
+            informed_leave,
+            leave_category
           )
-          VALUES ($1, $2, $3::attendance_status, $4::attendance_approval_status, $5, $6, $7)
+          VALUES (
+            $1,
+            $2,
+            $3::attendance_status,
+            $4::attendance_approval_status,
+            $5,
+            $6,
+            $7,
+            $8::time,
+            $9::time,
+            $10::integer,
+            $11::boolean,
+            $12
+          )
           ON CONFLICT (user_id, attendance_date)
           DO UPDATE SET
             reported_status = EXCLUDED.reported_status,
@@ -4924,6 +5167,11 @@ app.post(
             approved_by = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_by ELSE NULL END,
             approved_at = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_at ELSE NULL END,
             reviewer_note = EXCLUDED.reviewer_note,
+            check_in_time = COALESCE(EXCLUDED.check_in_time, attendance_entries.check_in_time),
+            check_out_time = COALESCE(EXCLUDED.check_out_time, attendance_entries.check_out_time),
+            break_minutes = COALESCE(EXCLUDED.break_minutes, attendance_entries.break_minutes),
+            informed_leave = COALESCE(EXCLUDED.informed_leave, attendance_entries.informed_leave),
+            leave_category = COALESCE(EXCLUDED.leave_category, attendance_entries.leave_category),
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `,
@@ -4935,6 +5183,11 @@ app.post(
           approvedBy,
           approvedAt,
           reviewerNote,
+          checkInTime,
+          checkOutTime,
+          breakMinutes,
+          informedLeave,
+          leaveCategory,
         ],
       );
 
@@ -4964,7 +5217,16 @@ app.put(
         return res.status(400).json({ message: 'Invalid attendance id.' });
       }
 
-      const { status, approval_status, reviewer_note } = req.body;
+      const {
+        status,
+        approval_status,
+        reviewer_note,
+        check_in_time,
+        check_out_time,
+        break_minutes,
+        informed_leave,
+        leave_category,
+      } = req.body;
       const updates = [];
       const params = [];
       let idx = 1;
@@ -4982,6 +5244,39 @@ app.put(
       if (reviewer_note !== undefined) {
         updates.push(`reviewer_note = $${idx}`);
         params.push(reviewer_note);
+        idx += 1;
+      }
+      if (check_in_time !== undefined) {
+        updates.push(`check_in_time = $${idx}::time`);
+        params.push(normalizeShiftTimeInput(check_in_time));
+        idx += 1;
+      }
+      if (check_out_time !== undefined) {
+        updates.push(`check_out_time = $${idx}::time`);
+        params.push(normalizeShiftTimeInput(check_out_time));
+        idx += 1;
+      }
+      if (break_minutes !== undefined) {
+        const normalizedBreak =
+          break_minutes === null || break_minutes === ''
+            ? null
+            : Number(break_minutes);
+        updates.push(`break_minutes = $${idx}::integer`);
+        params.push(Number.isNaN(normalizedBreak) ? null : normalizedBreak);
+        idx += 1;
+      }
+      if (informed_leave !== undefined) {
+        updates.push(`informed_leave = $${idx}::boolean`);
+        params.push(informed_leave === null ? null : Boolean(informed_leave));
+        idx += 1;
+      }
+      if (leave_category !== undefined) {
+        const normalizedCategory =
+          typeof leave_category === 'string' && leave_category.trim()
+            ? leave_category.trim()
+            : null;
+        updates.push(`leave_category = $${idx}`);
+        params.push(normalizedCategory);
         idx += 1;
       }
 

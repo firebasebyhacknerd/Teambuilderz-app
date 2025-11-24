@@ -4,6 +4,11 @@ const stringDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date must be in YYYY-MM-DD format.' });
 
+const timeString = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'Time must be in HH:MM (24-hour) format.' });
+
 const isoDateTimeString = z
   .string()
   .trim()
@@ -15,6 +20,7 @@ const nonNegativeInt = z.number({ coerce: true }).int().nonnegative();
 const stageEnum = z.enum(['onboarding', 'marketing', 'interviewing', 'offered', 'placed', 'inactive']);
 const attendanceStatuses = z.enum(['present', 'half-day', 'absent', 'leave']);
 const attendanceApprovalStatuses = z.enum(['pending', 'approved', 'rejected']);
+const leaveCategories = z.enum(['cl', 'sl', 'emergency', 'lwp']);
 
 const optionalString = (max) => z.string().max(max).trim().optional().or(z.literal('')).transform((v) => (v ? v : null));
 const skillArray = z
@@ -211,18 +217,66 @@ module.exports = {
       .refine((data) => Object.values(data).some((value) => value !== undefined), {
         message: 'No user fields provided for update.',
       }),
-    attendanceCreate: z.object({
-      attendance_date: stringDate.optional(),
-      status: attendanceStatuses.optional(),
-      approval_status: attendanceApprovalStatuses.optional(),
-      reviewer_note: reviewerNoteField.optional(),
-      user_id: positiveInt.optional(),
-    }),
+    attendanceCreate: z
+      .object({
+        attendance_date: stringDate.optional(),
+        status: attendanceStatuses.optional(),
+        approval_status: attendanceApprovalStatuses.optional(),
+        reviewer_note: reviewerNoteField.optional(),
+        user_id: positiveInt.optional(),
+        check_in_time: timeString.optional().or(z.literal('').transform(() => null)),
+        check_out_time: timeString.optional().or(z.literal('').transform(() => null)),
+        break_minutes: z
+          .number({ coerce: true })
+          .int()
+          .min(0)
+          .max(240, { message: 'Break minutes cannot exceed 240.' })
+          .optional(),
+        informed_leave: z.boolean().optional(),
+        leave_category: leaveCategories.optional().or(z.literal('').transform(() => null)),
+      })
+      .superRefine((data, ctx) => {
+        const status = data.status || 'present';
+        const requiresTiming = status === 'present' || status === 'half-day';
+        if (requiresTiming) {
+          if (!data.check_in_time) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['check_in_time'],
+              message: 'Check-in time is required for present/half-day entries.',
+            });
+          }
+          if (!data.check_out_time) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ['check_out_time'],
+              message: 'Check-out time is required for present/half-day entries.',
+            });
+          }
+        }
+        if (status === 'leave' && !data.leave_category) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['leave_category'],
+            message: 'Leave type is required when requesting leave.',
+          });
+        }
+      }),
     attendanceUpdate: z
       .object({
         status: attendanceStatuses.optional(),
         approval_status: attendanceApprovalStatuses.optional(),
         reviewer_note: reviewerNoteField.optional(),
+        check_in_time: timeString.optional().or(z.literal('').transform(() => null)),
+        check_out_time: timeString.optional().or(z.literal('').transform(() => null)),
+        break_minutes: z
+          .number({ coerce: true })
+          .int()
+          .min(0)
+          .max(240, { message: 'Break minutes cannot exceed 240.' })
+          .optional(),
+        informed_leave: z.boolean().optional(),
+        leave_category: leaveCategories.optional().or(z.literal('').transform(() => null)),
       })
       .refine((data) => Object.values(data).some((value) => value !== undefined), {
         message: 'No attendance fields provided for update.',
