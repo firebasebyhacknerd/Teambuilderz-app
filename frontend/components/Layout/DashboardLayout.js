@@ -2,12 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { ArrowLeft, Menu, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, Menu, ChevronLeft, ChevronRight, X, HelpCircle, Command, Moon, Sun, Monitor } from "lucide-react";
 import { Button } from "../ui/button";
 import ActivityPulse from "../analytics/ActivityPulse";
 import { ThemeSelect } from "../ui/theme-toggle";
+import { motion, AnimatePresence } from "framer-motion";
+import { ThemeToggle } from "../../lib/theme";
+import MobileNav from "../ui/mobile-nav";
+import SearchInput from "../ui/search-input";
 
 const STORAGE_KEY = "tbz-sidebar";
+const HELP_LINK = "https://intranet.teambuilderz/policies";
 
 const DashboardLayout = ({
   title,
@@ -15,11 +20,14 @@ const DashboardLayout = ({
   links = [],
   actions = null,
   onBack = null,
+  quickActions: quickActionsProp = [],
   children,
 }) => {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [searchValue, setSearchValue] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -42,8 +50,84 @@ const DashboardLayout = ({
     } catch (error) {}
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const sidebarWidth = sidebarCollapsed ? "w-20" : "w-72";
   const mainOffset = sidebarCollapsed ? "lg:ml-20" : "lg:ml-72";
+
+  const defaultQuickActions = useMemo(() => {
+    if (router.pathname.startsWith("/admin")) {
+      return [
+        {
+          label: "Attendance",
+          description: "Review and approve submissions",
+          action: () => router.push("/admin/attendance"),
+        },
+        {
+          label: "Reports",
+          description: "View performance & compliance",
+          action: () => router.push("/admin/reports"),
+        },
+        {
+          label: "Users",
+          description: "Manage admin & recruiter accounts",
+          action: () => router.push("/admin/users"),
+        },
+      ];
+    }
+    return [
+      {
+        label: "Dashboard",
+        description: "Back to recruiter home",
+        action: () => router.push("/recruiter"),
+      },
+      {
+        label: "Candidates",
+        description: "Open your pipeline",
+        action: () => router.push("/recruiter/candidates"),
+      },
+      {
+        label: "Submit leave",
+        description: "Scroll to the leave card",
+        action: () => document.querySelector("#leave-card")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      },
+    ];
+  }, [router]);
+
+  const mergedQuickActions = useMemo(() => {
+    if (quickActionsProp.length > 0) {
+      return quickActionsProp;
+    }
+    return defaultQuickActions;
+  }, [defaultQuickActions, quickActionsProp]);
+
+  const filteredQuickActions = useMemo(() => {
+    if (!searchValue.trim()) {
+      return mergedQuickActions;
+    }
+    const query = searchValue.trim().toLowerCase();
+    return mergedQuickActions.filter(
+      ({ label, description }) =>
+        label.toLowerCase().includes(query) || description?.toLowerCase().includes(query),
+    );
+  }, [mergedQuickActions, searchValue]);
+
+  const handleQuickActionSelect = (action) => {
+    if (typeof action === "function") {
+      action();
+    }
+    setCommandPaletteOpen(false);
+    setSearchValue("");
+  };
 
   const renderedLinks = useMemo(
     () =>
@@ -165,6 +249,16 @@ const DashboardLayout = ({
                 </div>
               </div>
               <div className="hidden lg:flex items-center gap-3">
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setCommandPaletteOpen(true)}>
+                  <Command size={16} />
+                  Quick actions
+                  <span className="text-[11px] text-muted-foreground">⌘K</span>
+                </Button>
+                <Button variant="ghost" size="icon" asChild>
+                  <a href={HELP_LINK} target="_blank" rel="noreferrer" aria-label="Open help center">
+                    <HelpCircle size={18} />
+                  </a>
+                </Button>
                 <ThemeSelect hideLabel />
                 <ActivityPulse />
                 {actions}
@@ -177,10 +271,39 @@ const DashboardLayout = ({
                   Live environment
                 </div>
                 <div className="flex flex-1 items-center gap-2 lg:hidden">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2 flex-1"
+                    onClick={() => setCommandPaletteOpen(true)}
+                  >
+                    <Command size={16} />
+                    Quick actions
+                  </Button>
+                  <Button variant="ghost" size="icon" asChild>
+                    <a href={HELP_LINK} target="_blank" rel="noreferrer" aria-label="Open help center">
+                      <HelpCircle size={18} />
+                    </a>
+                  </Button>
                   <ThemeSelect hideLabel compact />
                   <ActivityPulse />
                   {actions}
                 </div>
+              </div>
+            )}
+            {mergedQuickActions.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {mergedQuickActions.slice(0, 4).map(({ label, description, action }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => handleQuickActionSelect(action)}
+                    className="group rounded-lg border border-border bg-card/70 px-3 py-2 text-left text-xs shadow-sm transition hover:border-primary/50 hover:bg-primary/5"
+                  >
+                    <p className="font-semibold text-foreground">{label}</p>
+                    <p className="text-muted-foreground">{description}</p>
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -190,6 +313,59 @@ const DashboardLayout = ({
           <div className="mx-auto max-w-[1440px]">{children}</div>
         </main>
       </div>
+      {commandPaletteOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/25 backdrop-blur-sm flex items-start justify-center px-4 py-12"
+          onClick={() => {
+            setCommandPaletteOpen(false);
+            setSearchValue("");
+          }}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border border-border bg-background p-6 shadow-2xl space-y-4"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Quick actions</p>
+                <h3 className="text-lg font-semibold text-foreground">{title}</h3>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setCommandPaletteOpen(false)}>
+                <X size={18} />
+              </Button>
+            </div>
+            <input
+              type="text"
+              placeholder="Search actions…"
+              className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              autoFocus
+            />
+            <div className="max-h-72 overflow-y-auto space-y-2">
+              {filteredQuickActions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No actions match “{searchValue}”.</p>
+              ) : (
+                filteredQuickActions.map(({ label, description, action }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => handleQuickActionSelect(action)}
+                    className="w-full rounded-lg border border-border bg-card px-4 py-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
+                  >
+                    <p className="text-sm font-semibold text-foreground">{label}</p>
+                    <p className="text-xs text-muted-foreground">{description}</p>
+                  </button>
+                ))
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Tip: Press <span className="rounded border border-border bg-muted px-1 py-0.5">⌘/Ctrl + K</span> to open this
+              palette from anywhere.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

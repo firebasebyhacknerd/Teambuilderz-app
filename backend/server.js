@@ -5906,6 +5906,10 @@ app.delete('/api/v1/users/:id', verifyToken, requireRole('Admin'), async (req, r
   }
 });
 
+// PDF Export Routes
+const pdfRoutes = require('./routes/pdfRoutes');
+app.use('/api/v1/pdf', pdfRoutes);
+
 // Automation and Alert Functions
 async function checkDailyQuotas() {
   try {

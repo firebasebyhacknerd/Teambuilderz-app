@@ -17,6 +17,7 @@ import {
   Sunrise,
   Plane,
   Ban,
+  HelpCircle,
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -24,6 +25,7 @@ import { Badge } from '../../components/ui/badge';
 import { Label } from '../../components/ui/label';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
+import PDFExportButton from '../../components/ui/pdf-export-button';
 import {
   useRecruiterProfileQuery,
   useNotificationsQuery,
@@ -99,6 +101,13 @@ const HALF_DAY_REASON_LABELS = {
 };
 
 const STATUS_LOCK_MESSAGE = 'Shift attendance is recorded by admins. Use this form only to request leave.';
+const POLICY_DOC_URL = 'https://intranet.teambuilderz/policies/attendance';
+const POLICY_TIPS = [
+  'Login by 7:00 PM IST. Arriving after 8:00 PM counts as a half-day.',
+  'Logout within two hours of shift end to avoid another half-day.',
+  'Weekend auto-present can turn into sandwich leave if Friday and Monday are absences.',
+  'Uninformed leave results in a full-day salary deduction.',
+];
 
 const RecruiterDashboard = () => {
   const router = useRouter();
@@ -125,6 +134,16 @@ const RecruiterDashboard = () => {
     [candidates]
   );
   const progressPercent = Math.min(100, (totalAppsToday / DAILY_TARGET) * 100);
+  const nextActionMessage = useMemo(() => {
+    const remaining = Math.max(0, DAILY_TARGET - totalAppsToday);
+    if (remaining === 0) {
+      return 'Daily target met – keep logging to boost weekly average.';
+    }
+    if (remaining <= 5) {
+      return 'Almost there! Log a few more applications to secure your quota.';
+    }
+    return `Log ${remaining} more applications to hit today’s target.`;
+  }, [totalAppsToday]);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -365,6 +384,15 @@ const RecruiterDashboard = () => {
   const statusLocked = attendanceStatus !== 'leave';
   const missingLeaveType = requiresLeaveType && !leaveCategory;
   const submitAttendanceDisabled = submitAttendance.isPending || statusLocked || missingLeaveType;
+  const leaveHistory = useMemo(() => {
+    if (!attendanceData?.records) {
+      return [];
+    }
+    return attendanceData.records
+      .filter((record) => record.reportedStatus === 'leave')
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 5);
+  }, [attendanceData?.records]);
 
   const handleAttendanceSubmit = () => {
     if (attendanceStatus !== 'leave') {
@@ -528,10 +556,23 @@ const RecruiterDashboard = () => {
       subtitle={`Welcome back, ${userName}`}
       links={sidebarLinks}
       actions={
-        <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
-          <LogOut size={16} />
-          Logout
-        </Button>
+        <div className="flex gap-2">
+          <PDFExportButton
+            reportType="candidates"
+            data={{
+              stage: undefined,
+              dateFrom: undefined,
+              dateTo: undefined
+            }}
+            filename="dashboard-candidates-report"
+            variant="outline"
+            size="sm"
+          />
+          <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
+            <LogOut size={16} />
+            Logout
+          </Button>
+        </div>
       }
     >
       {toastAlert ? (
@@ -573,6 +614,7 @@ const RecruiterDashboard = () => {
           <div className="text-xs uppercase tracking-wide opacity-90">Today&apos;s Applications</div>
           <div className="text-2xl font-semibold mt-1">{totalAppsToday} / {DAILY_TARGET}</div>
           <div className="text-sm opacity-90 mt-1">{Math.round(progressPercent)}% of daily target</div>
+          <p className="mt-2 text-xs text-emerald-100">{nextActionMessage}</p>
         </div>
         <div className="rounded-xl bg-gradient-to-r from-amber-400/90 via-amber-400 to-amber-500 text-amber-950 p-4 sm:p-5 shadow-lg shadow-amber-400/30">
           <div className="text-xs uppercase tracking-wide opacity-90">Alerts</div>
@@ -587,7 +629,7 @@ const RecruiterDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <Card className="p-6 space-y-4">
+        <Card id="leave-card" className="p-6 space-y-4">
                     <div className="flex items-center gap-3">
             <Badge
               variant="outline"
@@ -655,6 +697,24 @@ const RecruiterDashboard = () => {
           <p className="text-[11px] text-muted-foreground">
             {STATUS_LOCK_MESSAGE}
           </p>
+          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <HelpCircle className="h-4 w-4 text-primary" />
+                Policy reminders
+              </div>
+              <Button variant="link" size="sm" asChild className="h-auto p-0 text-xs">
+                <a href={POLICY_DOC_URL} target="_blank" rel="noreferrer">
+                  View full policy
+                </a>
+              </Button>
+            </div>
+            <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+              {POLICY_TIPS.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
+            </ul>
+          </div>
           {leaveRequiresNotice ? (
             <div className="space-y-3 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 p-3">
               {requiresLeaveType ? (
@@ -788,6 +848,41 @@ const RecruiterDashboard = () => {
           </div>
         </Card>
       </div>
+      {leaveHistory.length ? (
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Recent Leave Requests</h2>
+              <p className="text-xs text-muted-foreground">Latest submissions and admin decisions</p>
+            </div>
+            <Badge variant="outline">{leaveHistory.length} shown</Badge>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[480px] text-sm border border-border rounded-lg overflow-hidden">
+              <thead className="bg-muted/60 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Status</th>
+                  <th className="px-3 py-2 text-left">Approval</th>
+                  <th className="px-3 py-2 text-left">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaveHistory.map((record) => (
+                  <tr key={record.id} className="border-t border-border/60">
+                    <td className="px-3 py-2 font-medium text-foreground">{record.date}</td>
+                    <td className="px-3 py-2 capitalize">{record.reportedStatus}</td>
+                    <td className="px-3 py-2 capitalize">{record.approvalStatus}</td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {record.reviewerNote || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
     </DashboardLayout>
   );
 };

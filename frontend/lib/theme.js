@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Moon, Sun, Monitor } from 'lucide-react';
+import { Button } from '../components/ui/button';
 
 const STORAGE_KEY = 'tbz-theme';
 const VALID_THEMES = new Set(['light', 'dark', 'system']);
@@ -103,6 +105,52 @@ export function ThemeProvider({ children }) {
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
+export function ThemeToggle({ className = '', ...props }) {
+  const { theme, setTheme } = useTheme();
+  
+  const getIcon = () => {
+    switch (theme) {
+      case 'dark':
+        return <Moon className="h-4 w-4" />;
+      case 'light':
+        return <Sun className="h-4 w-4" />;
+      default:
+        return <Monitor className="h-4 w-4" />;
+    }
+  };
+  
+  const getLabel = () => {
+    switch (theme) {
+      case 'dark':
+        return 'Dark mode';
+      case 'light':
+        return 'Light mode';
+      default:
+        return 'System';
+    }
+  };
+  
+  const cycleTheme = () => {
+    const themes = ['light', 'dark', 'system'];
+    const currentIndex = themes.indexOf(theme);
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
+    setTheme(nextTheme);
+  };
+  
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={cycleTheme}
+      className={`w-full justify-start ${className}`}
+      {...props}
+    >
+      {getIcon()}
+      <span className="ml-2">{getLabel()}</span>
+    </Button>
+  );
 }
 
 export function useTheme() {

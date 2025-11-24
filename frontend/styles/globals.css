@@ -52,8 +52,10 @@
 
     --radius: 1rem;
 
-    --font-display: 'Manrope', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-body: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: "Manrope", "Inter", system-ui, -apple-system,
+      BlinkMacSystemFont, sans-serif;
+    --font-body: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+      sans-serif;
   }
 
   .dark {
@@ -91,6 +93,8 @@
 
   * {
     @apply border-border;
+    transition: border-color 0.3s ease, background-color 0.3s ease,
+      color 0.3s ease;
   }
 
   body {

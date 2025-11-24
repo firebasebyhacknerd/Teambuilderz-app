@@ -25,6 +25,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import EmptyState from '../../components/ui/empty-state';
+import PDFExportButton from '../../components/ui/pdf-export-button';
 import {
   useApplicationsQuery,
   useInterviewsQuery,
@@ -359,10 +360,23 @@ const ApplicationsPage = () => {
       subtitle={`Overview of recent submissions${searchTerm ? ` matching "${searchTerm}"` : ''}`}
       links={sidebarLinks}
       actions={
-        <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
-          <LogOut size={16} />
-          Logout
-        </Button>
+        <div className="flex gap-2">
+          <PDFExportButton
+            reportType="applications"
+            data={{
+              status: statusFilter || undefined,
+              dateFrom: undefined,
+              dateTo: undefined
+            }}
+            filename="applications-report"
+            variant="outline"
+            size="sm"
+          />
+          <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
+            <LogOut size={16} />
+            Logout
+          </Button>
+        </div>
       }
     >
       <div className="space-y-6">

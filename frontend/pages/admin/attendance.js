@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
+import PDFExportButton from '../../components/ui/pdf-export-button';
 import {
   Dialog,
   DialogContent,
@@ -148,10 +149,17 @@ const AdminAttendancePage = () => {
       ].join('\n'),
     [],
   );
-  const templateHref = useMemo(
-    () => `data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`,
-    [templateCsv],
-  );
+const templateHref = useMemo(
+  () => `data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`,
+  [templateCsv],
+);
+const handleResetFilters = useCallback(() => {
+  setDateFrom(startOfMonthIso);
+  setDateTo(todayIso);
+  setSelectedRecruiter('all');
+  setPendingOnly(false);
+  setActivePreset('month');
+}, [startOfMonthIso, todayIso]);
   const formatTimestamp = useCallback((value) => {
     if (!value) {
       return '';
@@ -515,7 +523,21 @@ const AdminAttendancePage = () => {
       title="Attendance Control"
       subtitle="Review recruiter attendance submissions and approvals."
       links={sidebarLinks}
-      actions={null}
+      actions={
+        <div className="flex gap-2">
+          <PDFExportButton
+            reportType="attendance"
+            data={{
+              dateFrom,
+              dateTo,
+              userId: selectedRecruiter === 'all' ? undefined : selectedRecruiter
+            }}
+            filename="attendance-report"
+            variant="outline"
+            size="sm"
+          />
+        </div>
+      }
       onBack={null}
     >
       <input
@@ -551,7 +573,7 @@ const AdminAttendancePage = () => {
                 {actionMessage.text}
               </div>
             ) : null}
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Badge variant="outline">Range {dateFrom}→{dateTo}</Badge>
               {selectedRecruiter && selectedRecruiter !== 'all' ? (
                 <Badge variant="outline">Recruiter #{selectedRecruiter}</Badge>
@@ -561,6 +583,9 @@ const AdminAttendancePage = () => {
               <Badge variant={pendingOnly ? 'default' : 'outline'}>
                 {pendingOnly ? 'Pending only' : 'All approvals'}
               </Badge>
+              <Button variant="ghost" size="xs" onClick={handleResetFilters}>
+                Reset filters
+              </Button>
             </div>
             {importResult ? (
               <div className="rounded-lg border border-dashed px-4 py-3 text-xs bg-muted/30 space-y-2">

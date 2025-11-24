@@ -11,6 +11,7 @@ import { Badge } from '../../components/ui/badge';
 import { useCandidatesQuery } from '../../lib/queryHooks';
 import useAuthState from '../../lib/useAuthState';
 import API_URL from '../../lib/api';
+import PDFExportButton from '../../components/ui/pdf-export-button';
 
 const stageStyles = {
   onboarding: 'bg-blue-100 text-blue-700',
@@ -169,10 +170,23 @@ const CandidatesPage = () => {
       subtitle={`Hello ${userName}, ${filteredCandidates.length} candidate${filteredCandidates.length === 1 ? '' : 's'} in view.`}
       links={sidebarLinks}
       actions={
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleLogout}>
-          <LogOut className="h-4 w-4" />
-          Logout
-        </Button>
+        <div className="flex gap-2">
+          <PDFExportButton
+            reportType="candidates"
+            data={{
+              stage: stageFilter === 'all' ? undefined : stageFilter,
+              dateFrom: undefined,
+              dateTo: undefined
+            }}
+            filename="candidates-report"
+            variant="outline"
+            size="sm"
+          />
+          <Button variant="outline" size="sm" className="gap-2" onClick={handleLogout}>
+            <LogOut className="h-4 w-4" />
+            Logout
+          </Button>
+        </div>
       }
     >
       <Card className="p-4 sm:p-6 space-y-4 border border-white/50 bg-white/70 backdrop-blur dark:bg-slate-900/80">

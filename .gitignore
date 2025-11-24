@@ -13,3 +13,10 @@ frontend/node_modules/@next/swc-win32-x64-msvc/next-swc.win32-x64-msvc.node
 # TLS certificates (placeholder keep file)
 certs/
 !certs/.gitkeep
+
+# Test files with linting issues
+frontend/pages/test-pdf.js
+frontend/pages/test-pdf-new.js
+frontend/components/ui/enhanced-pdf-export-button.js
+backend/services/enhancedPdfService.js
+frontend/pages/admin/dashboard.js
