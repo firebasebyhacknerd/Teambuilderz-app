@@ -1,1 +1,50 @@
-import React from 'react';\nimport { motion } from 'framer-motion';\nimport { Button } from './button';\n\nexport const EnhancedButton = ({ children, className = '', ...props }) => {\n  return (\n    <motion.div\n      whileHover={{ scale: 1.02 }}\n      whileTap={{ scale: 0.98 }}\n      transition={{ type: \"spring\", stiffness: 400, damping: 25 }}\n    >\n      <Button className={`transition-all duration-200 ${className}`} {...props}>\n        {children}\n      </Button>\n    </motion.div>\n  );\n};\n\nexport const AnimatedCard = ({ children, className = '', delay = 0, ...props }) => {\n  return (\n    <motion.div\n      initial={{ opacity: 0, y: 20 }}\n      animate={{ opacity: 1, y: 0 }}\n      transition={{ delay, duration: 0.5 }}\n      className={`transition-all duration-300 hover:shadow-lg ${className}`}\n      {...props}\n    >\n      {children}\n    </motion.div>\n  );\n};\n\nexport const HoverCard = ({ children, className = '', ...props }) => {\n  return (\n    <motion.div\n      whileHover={{ \n        scale: 1.02, \n        boxShadow: \"0 10px 40px rgba(0, 0, 0, 0.1)\"\n      }}\n      transition={{ type: \"spring\", stiffness: 300, damping: 20 }}\n      className={`transition-all duration-300 ${className}`}\n      {...props}\n    >\n      {children}\n    </motion.div>\n  );\n};
+﻿import React from 'react';
+import { motion } from 'framer-motion';
+import { Button } from './button';
+
+export const EnhancedButton = ({ children, className = '', ...props }) => {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+    >
+      <Button className={`transition-all duration-200 ${className}`} {...props}>
+        {children}
+      </Button>
+    </motion.div>
+  );
+};
+
+export const AnimatedCard = ({ children, className = '', delay = 0, ...props }) => {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, duration: 0.5 }}
+      className={`transition-all duration-300 hover:shadow-lg ${className}`}
+      {...props}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
+export const HoverCard = ({ children, className = '', ...props }) => {
+  return (
+    <motion.div
+      whileHover={{ 
+        scale: 1.02, 
+        boxShadow: "0 10px 40px rgba(0, 0, 0, 0.1)"
+      }}
+      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+      className={`transition-all duration-300 ${className}`}
+      {...props}
+    >
+      {children}
+    </motion.div>
+  );
+};
+
+
+

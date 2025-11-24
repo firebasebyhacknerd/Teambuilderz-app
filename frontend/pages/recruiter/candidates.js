@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
@@ -12,6 +13,8 @@ import { useCandidatesQuery } from '../../lib/queryHooks';
 import useAuthState from '../../lib/useAuthState';
 import API_URL from '../../lib/api';
 import PDFExportButton from '../../components/ui/pdf-export-button';
+import { CardSkeleton } from '../../components/ui/skeleton';
+import EmptyState from '../../components/ui/empty-state';
 
 const stageStyles = {
   onboarding: 'bg-blue-100 text-blue-700',
@@ -131,8 +134,10 @@ const CandidatesPage = () => {
         method: 'POST',
         credentials: 'include',
       });
+      toast.success('Logged out successfully');
     } catch (logoutError) {
       console.warn('Failed to log out cleanly', logoutError);
+      toast.error('Logout failed, but clearing local session');
     }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
@@ -294,14 +299,16 @@ const CandidatesPage = () => {
             ))}
           </div>
         ) : filteredCandidates.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground space-y-3">
-            <p>No candidates matched your filters.</p>
-            {hasActiveFilters ? (
+          <EmptyState
+            icon={Users}
+            title={hasActiveFilters ? "No candidates matched your filters" : "No candidates yet"}
+            description={hasActiveFilters ? "Try adjusting your search or filters" : "Start by adding your first candidate to your pipeline"}
+            action={hasActiveFilters ? (
               <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
                 Reset filters
               </Button>
             ) : null}
-          </div>
+          />
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border bg-card/70">
             {filteredCandidates.map((candidate) => {
@@ -362,6 +369,7 @@ const CandidatesPage = () => {
 };
 
 export default CandidatesPage;
+
 
 
 

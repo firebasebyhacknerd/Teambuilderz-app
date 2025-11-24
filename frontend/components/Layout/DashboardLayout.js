@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -371,3 +371,5 @@ const DashboardLayout = ({
 };
 
 export default DashboardLayout;
+export { DashboardLayout };
+

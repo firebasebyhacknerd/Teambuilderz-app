@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import API_URL from './api';
 
@@ -64,3 +64,4 @@ export const useAuthState = ({ requireRole } = {}) => {
 };
 
 export default useAuthState;
+

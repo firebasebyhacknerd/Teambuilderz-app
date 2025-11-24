@@ -4,7 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { Pool } = require('pg');
+const { pool, dbConfig } = require('./db');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const config = require('./lib/config');
@@ -233,16 +233,6 @@ const profileLimiter = createLimiter({
 });
 
 // Database Connection Setup
-const dbConfig = {
-  user: config.get('DB_USER'),
-  host: config.get('DB_HOST', 'localhost'),
-  database: config.get('DB_NAME'),
-  password: config.get('DB_PASSWORD'),
-  port: config.getInt('DB_PORT', 5432),
-};
-
-const pool = new Pool(dbConfig);
-
 app.set('trust proxy', 1);
 app.use(
   helmet({

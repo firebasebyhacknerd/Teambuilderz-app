@@ -1,4 +1,4 @@
-export async function getServerSideProps() {
+﻿export async function getServerSideProps() {
   return {
     redirect: {
       destination: '/login',
@@ -10,3 +10,4 @@ export async function getServerSideProps() {
 export default function Index() {
   return null;
 }
+

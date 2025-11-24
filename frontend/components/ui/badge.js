@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import * as React from "react";
 import { cva } from "class-variance-authority";
@@ -28,3 +28,4 @@ const Badge = React.forwardRef(({ className, variant, ...props }, ref) => (
 Badge.displayName = "Badge";
 
 export { Badge, badgeVariants };
+

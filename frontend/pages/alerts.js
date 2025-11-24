@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Bell,
@@ -310,5 +310,6 @@ const SummaryCard = ({ icon, title, value, color }) => (
 );
 
 export default AlertsPage;
+
 
 

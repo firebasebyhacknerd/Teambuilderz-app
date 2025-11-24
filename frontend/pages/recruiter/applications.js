@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
+import toast from 'react-hot-toast';
 import {
   FileText,
   Filter,
@@ -272,8 +273,10 @@ const ApplicationsPage = () => {
         method: 'POST',
         credentials: 'include',
       });
+      toast.success('Logged out successfully');
     } catch (logoutError) {
       console.warn('Failed to log out cleanly', logoutError);
+      toast.error('Logout failed, but clearing local session');
     }
     localStorage.removeItem('token');
     localStorage.removeItem('userRole');
@@ -1039,6 +1042,7 @@ const SummaryCard = ({ label, value }) => (
 );
 
 export default ApplicationsPage;
+
 
 
 

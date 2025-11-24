@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { CheckCircle2, XCircle, Clock, CalendarCheck, Loader2, Sunrise } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -149,10 +149,10 @@ const AdminAttendancePage = () => {
       ].join('\n'),
     [],
   );
-const templateHref = useMemo(
-  () => `data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`,
-  [templateCsv],
-);
+  const templateHref = useMemo(
+    () => `data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`,
+    [templateCsv],
+  );
 const handleResetFilters = useCallback(() => {
   setDateFrom(startOfMonthIso);
   setDateTo(todayIso);
@@ -1361,6 +1361,9 @@ const SummaryStat = ({ icon, label, value, accent, meta = null }) => (
 );
 
 export default AdminAttendancePage;
+
+
+
 
 
 

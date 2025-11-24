@@ -1,1 +1,225 @@
-import React, { useState, useEffect } from 'react';\nimport { useRouter } from 'next/router';\nimport { motion, AnimatePresence } from 'framer-motion';\nimport { Menu, X, Home, Users, FileText, Settings, Bell, ChevronDown } from 'lucide-react';\nimport { Button } from './button';\nimport { Card } from './card';\nimport { ThemeToggle } from '../../lib/theme';\n\nconst MobileNav = ({ userRole = 'Admin', links = [] }) => {\n  const router = useRouter();\n  const [isOpen, setIsOpen] = useState(false);\n  const [activeDropdown, setActiveDropdown] = useState(null);\n\n  useEffect(() => {\n    const handleEscape = (e) => {\n      if (e.key === 'Escape') {\n        setIsOpen(false);\n        setActiveDropdown(null);\n      }\n    };\n    document.addEventListener('keydown', handleEscape);\n    return () => document.removeEventListener('keydown', handleEscape);\n  }, []);\n\n  const toggleDropdown = (menu) => {\n    setActiveDropdown(activeDropdown === menu ? null : menu);\n  };\n\n  const handleNavigation = (path) => {\n    router.push(path);\n    setIsOpen(false);\n    setActiveDropdown(null);\n  };\n\n  const defaultLinks = {\n    Admin: [\n      { label: 'Dashboard', icon: Home, href: '/admin' },\n      { \n        label: 'Management', \n        icon: Settings, \n        href: '#',\n        submenu: [\n          { label: 'Users', href: '/admin/users' },\n          { label: 'Attendance', href: '/admin/attendance' },\n          { label: 'Reports', href: '/admin/reports' }\n        ]\n      },\n      { label: 'Alerts', icon: Bell, href: '/alerts' },\n    ],\n    Recruiter: [\n      { label: 'Dashboard', icon: Home, href: '/recruiter' },\n      { \n        label: 'Candidates', \n        icon: Users, \n        href: '#',\n        submenu: [\n          { label: 'My Candidates', href: '/recruiter/candidates' },\n          { label: 'Applications', href: '/recruiter/applications' },\n          { label: 'Interviews', href: '/recruiter/interviews' }\n        ]\n      },\n      { label: 'Reports', icon: FileText, href: '/recruiter/reports' },\n    ]\n  };\n\n  const navigationLinks = links.length > 0 ? links : defaultLinks[userRole] || [];\n\n  return (\n    <div className=\"lg:hidden\">\n      {/* Mobile Header */}\n      <div className=\"flex items-center justify-between p-4 border-b bg-card\">\n        <div className=\"flex items-center gap-3\">\n          <motion.button\n            whileTap={{ scale: 0.95 }}\n            onClick={() => setIsOpen(!isOpen)}\n            className=\"p-2 rounded-md hover:bg-accent transition-colors\"\n          >\n            {isOpen ? <X className=\"h-5 w-5\" /> : <Menu className=\"h-5 w-5\" />}\n          </motion.button>\n          <h1 className=\"text-lg font-semibold\">TeamBuilderz</h1>\n        </div>\n        <div className=\"flex items-center gap-2\">\n          <ThemeToggle className=\"px-2\" />\n        </div>\n      </div>\n\n      {/* Mobile Navigation Overlay */}\n      <AnimatePresence>\n        {isOpen && (\n          <>\n            {/* Backdrop */}\n            <motion.div\n              initial={{ opacity: 0 }}\n              animate={{ opacity: 1 }}\n              exit={{ opacity: 0 }}\n              className=\"fixed inset-0 bg-black/50 z-40\"\n              onClick={() => setIsOpen(false)}\n            />\n            \n            {/* Slide-out Menu */}\n            <motion.div\n              initial={{ x: '-100%' }}\n              animate={{ x: 0 }}\n              exit={{ x: '-100%' }}\n              transition={{ type: 'spring', damping: 25, stiffness: 200 }}\n              className=\"fixed left-0 top-0 h-full w-80 bg-card border-r z-50 overflow-y-auto\"\n            >\n              <div className=\"p-4\">\n                {/* Menu Header */}\n                <div className=\"flex items-center justify-between mb-6\">\n                  <h2 className=\"text-xl font-semibold\">Menu</h2>\n                  <motion.button\n                    whileTap={{ scale: 0.95 }}\n                    onClick={() => setIsOpen(false)}\n                    className=\"p-2 rounded-md hover:bg-accent transition-colors\"\n                  >\n                    <X className=\"h-5 w-5\" />\n                  </motion.button>\n                </div>\n\n                {/* Navigation Items */}\n                <nav className=\"space-y-2\">\n                  {navigationLinks.map((item, index) => {\n                    const Icon = item.icon;\n                    const hasSubmenu = item.submenu && item.submenu.length > 0;\n                    const isActive = activeDropdown === index;\n\n                    return (\n                      <div key={item.label}>\n                        <motion.div\n                          initial={{ opacity: 0, x: -20 }}\n                          animate={{ opacity: 1, x: 0 }}\n                          transition={{ delay: index * 0.1 }}\n                        >\n                          {hasSubmenu ? (\n                            <button\n                              onClick={() => toggleDropdown(index)}\n                              className=\"w-full flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors\"\n                            >\n                              <div className=\"flex items-center gap-3\">\n                                <Icon className=\"h-5 w-5\" />\n                                <span className=\"font-medium\">{item.label}</span>\n                              </div>\n                              <ChevronDown \n                                className={`h-4 w-4 transition-transform duration-200 ${isActive ? 'rotate-180' : ''}`} \n                              />\n                            </button>\n                          ) : (\n                            <button\n                              onClick={() => handleNavigation(item.href)}\n                              className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors ${\n                                router.pathname === item.href \n                                  ? 'bg-primary text-primary-foreground' \n                                  : 'hover:bg-accent'\n                              }`}\n                            >\n                              <Icon className=\"h-5 w-5\" />\n                              <span className=\"font-medium\">{item.label}</span>\n                            </button>\n                          )}\n                        </motion.div>\n\n                        {/* Submenu */}\n                        <AnimatePresence>\n                          {hasSubmenu && isActive && (\n                            <motion.div\n                              initial={{ height: 0, opacity: 0 }}\n                              animate={{ height: 'auto', opacity: 1 }}\n                              exit={{ height: 0, opacity: 0 }}\n                              transition={{ duration: 0.2 }}\n                              className=\"ml-8 mt-1 space-y-1 overflow-hidden\"\n                            >\n                              {item.submenu.map((subItem, subIndex) => (\n                                <motion.button\n                                  key={subItem.label}\n                                  initial={{ opacity: 0, x: -10 }}\n                                  animate={{ opacity: 1, x: 0 }}\n                                  transition={{ delay: subIndex * 0.05 }}\n                                  onClick={() => handleNavigation(subItem.href)}\n                                  className={`w-full text-left p-2 rounded-md text-sm transition-colors ${\n                                    router.pathname === subItem.href\n                                      ? 'bg-accent text-accent-foreground font-medium'\n                                      : 'hover:bg-accent/50'\n                                  }`}\n                                >\n                                  {subItem.label}\n                                </motion.button>\n                              ))}\n                            </motion.div>\n                          )}\n                        </AnimatePresence>\n                      </div>\n                    );\n                  })}\n                </nav>\n\n                {/* User Section */}\n                <div className=\"mt-8 pt-6 border-t\">\n                  <div className=\"space-y-3\">\n                    <ThemeToggle />\n                    <Button \n                      variant=\"outline\" \n                      className=\"w-full justify-start\"\n                      onClick={() => {\n                        localStorage.clear();\n                        router.push('/login');\n                      }}\n                    >\n                      Sign Out\n                    </Button>\n                  </div>\n                </div>\n              </div>\n            </motion.div>\n          </>\n        )}\n      </AnimatePresence>\n    </div>\n  );\n};\n\nexport default MobileNav;
+﻿import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Menu, X, Home, Users, FileText, Settings, Bell, ChevronDown } from 'lucide-react';
+import { Button } from './button';
+import { Card } from './card';
+import { ThemeToggle } from '../../lib/theme';
+
+const MobileNav = ({ userRole = 'Admin', links = [] }) => {
+  const router = useRouter();
+  const [isOpen, setIsOpen] = useState(false);
+  const [activeDropdown, setActiveDropdown] = useState(null);
+
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+        setActiveDropdown(null);
+      }
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, []);
+
+  const toggleDropdown = (menu) => {
+    setActiveDropdown(activeDropdown === menu ? null : menu);
+  };
+
+  const handleNavigation = (path) => {
+    router.push(path);
+    setIsOpen(false);
+    setActiveDropdown(null);
+  };
+
+  const defaultLinks = {
+    Admin: [
+      { label: 'Dashboard', icon: Home, href: '/admin' },
+      { 
+        label: 'Management', 
+        icon: Settings, 
+        href: '#',
+        submenu: [
+          { label: 'Users', href: '/admin/users' },
+          { label: 'Attendance', href: '/admin/attendance' },
+          { label: 'Reports', href: '/admin/reports' }
+        ]
+      },
+      { label: 'Alerts', icon: Bell, href: '/alerts' },
+    ],
+    Recruiter: [
+      { label: 'Dashboard', icon: Home, href: '/recruiter' },
+      { 
+        label: 'Candidates', 
+        icon: Users, 
+        href: '#',
+        submenu: [
+          { label: 'My Candidates', href: '/recruiter/candidates' },
+          { label: 'Applications', href: '/recruiter/applications' },
+          { label: 'Interviews', href: '/recruiter/interviews' }
+        ]
+      },
+      { label: 'Reports', icon: FileText, href: '/recruiter/reports' },
+    ]
+  };
+
+  const navigationLinks = links.length > 0 ? links : defaultLinks[userRole] || [];
+
+  return (
+    <div className="lg:hidden">
+      {/* Mobile Header */}
+      <div className="flex items-center justify-between p-4 border-b bg-card">
+        <div className="flex items-center gap-3">
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setIsOpen(!isOpen)}
+            className="p-2 rounded-md hover:bg-accent transition-colors"
+          >
+            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </motion.button>
+          <h1 className="text-lg font-semibold">TeamBuilderz</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <ThemeToggle className="px-2" />
+        </div>
+      </div>
+
+      {/* Mobile Navigation Overlay */}
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 z-40"
+              onClick={() => setIsOpen(false)}
+            />
+            
+            {/* Slide-out Menu */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed left-0 top-0 h-full w-80 bg-card border-r z-50 overflow-y-auto"
+            >
+              <div className="p-4">
+                {/* Menu Header */}
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold">Menu</h2>
+                  <motion.button
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => setIsOpen(false)}
+                    className="p-2 rounded-md hover:bg-accent transition-colors"
+                  >
+                    <X className="h-5 w-5" />
+                  </motion.button>
+                </div>
+
+                {/* Navigation Items */}
+                <nav className="space-y-2">
+                  {navigationLinks.map((item, index) => {
+                    const Icon = item.icon;
+                    const hasSubmenu = item.submenu && item.submenu.length > 0;
+                    const isActive = activeDropdown === index;
+
+                    return (
+                      <div key={item.label}>
+                        <motion.div
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                        >
+                          {hasSubmenu ? (
+                            <button
+                              onClick={() => toggleDropdown(index)}
+                              className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-accent transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <Icon className="h-5 w-5" />
+                                <span className="font-medium">{item.label}</span>
+                              </div>
+                              <ChevronDown 
+                                className={`h-4 w-4 transition-transform duration-200 ${isActive ? 'rotate-180' : ''}`} 
+                              />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleNavigation(item.href)}
+                              className={`w-full flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                                router.pathname === item.href 
+                                  ? 'bg-primary text-primary-foreground' 
+                                  : 'hover:bg-accent'
+                              }`}
+                            >
+                              <Icon className="h-5 w-5" />
+                              <span className="font-medium">{item.label}</span>
+                            </button>
+                          )}
+                        </motion.div>
+
+                        {/* Submenu */}
+                        <AnimatePresence>
+                          {hasSubmenu && isActive && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="ml-8 mt-1 space-y-1 overflow-hidden"
+                            >
+                              {item.submenu.map((subItem, subIndex) => (
+                                <motion.button
+                                  key={subItem.label}
+                                  initial={{ opacity: 0, x: -10 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: subIndex * 0.05 }}
+                                  onClick={() => handleNavigation(subItem.href)}
+                                  className={`w-full text-left p-2 rounded-md text-sm transition-colors ${
+                                    router.pathname === subItem.href
+                                      ? 'bg-accent text-accent-foreground font-medium'
+                                      : 'hover:bg-accent/50'
+                                  }`}
+                                >
+                                  {subItem.label}
+                                </motion.button>
+                              ))}
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </nav>
+
+                {/* User Section */}
+                <div className="mt-8 pt-6 border-t">
+                  <div className="space-y-3">
+                    <ThemeToggle />
+                    <Button 
+                      variant="outline" 
+                      className="w-full justify-start"
+                      onClick={() => {
+                        localStorage.clear();
+                        router.push('/login');
+                      }}
+                    >
+                      Sign Out
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default MobileNav;
+
+
+

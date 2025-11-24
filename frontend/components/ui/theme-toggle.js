@@ -1,4 +1,4 @@
-import { useId } from 'react';
+﻿import { useId } from 'react';
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useTheme } from '../../lib/theme';
@@ -94,3 +94,4 @@ export function ThemeSelect({ className, hideLabel = false, compact = false }) {
     </div>
   );
 }
+

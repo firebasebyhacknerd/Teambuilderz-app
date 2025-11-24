@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   Area,
   AreaChart,
@@ -96,3 +96,4 @@ const ApplicationTrendChart = ({ data = [] }) => {
 };
 
 export default ApplicationTrendChart;
+

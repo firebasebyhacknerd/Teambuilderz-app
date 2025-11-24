@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'use-strict';
+﻿import React, { useState, useEffect, useRef } from 'use-strict';
 import { Sun, Moon, Laptop } from 'lucide-react';
 import { useTheme } from '../lib/theme';
 

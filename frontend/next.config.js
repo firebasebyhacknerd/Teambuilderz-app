@@ -1,4 +1,4 @@
-/** @type {import('next').NextConfig} */
+﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
   // Modern Next.js configuration
   reactStrictMode: true,
@@ -11,9 +11,7 @@ const nextConfig = {
       },
     ]
   },
-  experimental: {
-    allowedDevOrigins: ["http://192.168.1.230:3000"],
-  },
 }
 
 module.exports = nextConfig
+

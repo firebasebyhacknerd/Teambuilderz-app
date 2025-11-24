@@ -189,3 +189,4 @@ export async function flushAnalytics(reason = 'manual') {
 if (queue.length > 0 && config.flushInterval > 0) {
   scheduleFlush();
 }
+

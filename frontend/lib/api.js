@@ -1,4 +1,4 @@
-// Centralized API base URL selection so the frontend can run in different environments.
+﻿// Centralized API base URL selection so the frontend can run in different environments.
 const buildBrowserUrl = () => {
   if (typeof window === 'undefined') {
     return null;
@@ -36,3 +36,4 @@ const resolveApiUrl = () => {
 export const API_URL = resolveApiUrl();
 
 export default API_URL;
+

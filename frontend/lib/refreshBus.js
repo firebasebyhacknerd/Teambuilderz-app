@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+﻿import { useEffect } from 'react';
 
 const channels = new Map();
 
@@ -47,3 +47,4 @@ export const REFRESH_CHANNELS = Object.freeze({
   PERFORMANCE: 'performance',
   PROFILE: 'profile',
 });
+

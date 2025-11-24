@@ -1,1 +1,358 @@
-const express = require('express');\nconst router = express.Router();\nconst pdfService = require('../services/pdfService');\nconst pool = require('../db');\n\n// Middleware to check authentication\nconst authenticateToken = (req, res, next) => {\n  const authHeader = req.headers['authorization'];\n  const token = authHeader && authHeader.split(' ')[1];\n  \n  if (!token) {\n    return res.status(401).json({ message: 'Authentication required' });\n  }\n  \n  // For now, we'll use a simple token check. In production, use proper JWT verification\n  if (token !== 'session') {\n    return res.status(403).json({ message: 'Invalid token' });\n  }\n  \n  next();\n};\n\n// Admin-only middleware\nconst requireAdmin = (req, res, next) => {\n  const userRole = req.headers['x-user-role'];\n  if (userRole !== 'Admin') {\n    return res.status(403).json({ message: 'Admin access required' });\n  }\n  next();\n};\n\n// Generate attendance PDF report\nrouter.post('/attendance', authenticateToken, requireAdmin, async (req, res) => {\n  try {\n    const { dateFrom, dateTo, userId } = req.body;\n    \n    let query = `\n      SELECT \n        a.*,\n        u.name as user_name,\n        u.email as user_email\n      FROM attendance a\n      JOIN users u ON a.user_id = u.id\n      WHERE 1=1\n    `;\n    const params = [];\n    let paramIndex = 1;\n    \n    if (dateFrom) {\n      query += ` AND a.attendance_date >= $${paramIndex++}`;\n      params.push(dateFrom);\n    }\n    \n    if (dateTo) {\n      query += ` AND a.attendance_date <= $${paramIndex++}`;\n      params.push(dateTo);\n    }\n    \n    if (userId) {\n      query += ` AND a.user_id = $${paramIndex++}`;\n      params.push(userId);\n    }\n    \n    query += ` ORDER BY a.attendance_date DESC, u.name`;\n    \n    const result = await pool.query(query, params);\n    \n    const pdfData = {\n      dateFrom,\n      dateTo,\n      records: result.rows\n    };\n    \n    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'attendance');\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"attendance-report-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating attendance PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\n// Generate candidates PDF report\nrouter.post('/candidates', authenticateToken, async (req, res) => {\n  try {\n    const { stage, recruiterId, dateFrom, dateTo } = req.body;\n    const userId = req.headers['x-user-id'];\n    const userRole = req.headers['x-user-role'];\n    \n    let query = `\n      SELECT \n        c.*,\n        u.name as recruiter_name\n      FROM candidates c\n      LEFT JOIN users u ON c.recruiter_id = u.id\n      WHERE 1=1\n    `;\n    const params = [];\n    let paramIndex = 1;\n    \n    // Non-admin users can only see their assigned candidates\n    if (userRole !== 'Admin' && userId) {\n      query += ` AND c.recruiter_id = $${paramIndex++}`;\n      params.push(userId);\n    }\n    \n    if (stage) {\n      query += ` AND c.stage = $${paramIndex++}`;\n      params.push(stage);\n    }\n    \n    if (recruiterId && userRole === 'Admin') {\n      query += ` AND c.recruiter_id = $${paramIndex++}`;\n      params.push(recruiterId);\n    }\n    \n    if (dateFrom) {\n      query += ` AND c.created_at >= $${paramIndex++}`;\n      params.push(dateFrom);\n    }\n    \n    if (dateTo) {\n      query += ` AND c.created_at <= $${paramIndex++}`;\n      params.push(dateTo);\n    }\n    \n    query += ` ORDER BY c.created_at DESC`;\n    \n    const result = await pool.query(query, params);\n    \n    const pdfData = {\n      candidates: result.rows,\n      filters: { stage, recruiterId, dateFrom, dateTo }\n    };\n    \n    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'candidates');\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"candidates-report-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating candidates PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\n// Generate performance PDF report\nrouter.post('/performance', authenticateToken, requireAdmin, async (req, res) => {\n  try {\n    const { period = 'monthly', dateFrom, dateTo } = req.body;\n    \n    let dateFilter = '';\n    if (period === 'monthly') {\n      dateFilter = `AND da.activity_date >= NOW() - INTERVAL '1 month'`;\n    } else if (period === 'weekly') {\n      dateFilter = `AND da.activity_date >= NOW() - INTERVAL '1 week'`;\n    } else if (dateFrom && dateTo) {\n      dateFilter = `AND da.activity_date BETWEEN '${dateFrom}' AND '${dateTo}'`;\n    }\n    \n    const query = `\n      SELECT \n        u.id,\n        u.name,\n        u.email,\n        COALESCE(SUM(CASE WHEN da.applications_submitted > 0 THEN da.applications_submitted ELSE 0 END), 0) as applications,\n        COALESCE(SUM(CASE WHEN da.interviews_scheduled > 0 THEN da.interviews_scheduled ELSE 0 END), 0) as interviews,\n        COALESCE(SUM(CASE WHEN da.candidates_placed > 0 THEN da.candidates_placed ELSE 0 END), 0) as placements\n      FROM users u\n      LEFT JOIN daily_activity da ON u.id = da.user_id ${dateFilter}\n      WHERE u.role = 'Recruiter'\n      GROUP BY u.id, u.name, u.email\n      ORDER BY placements DESC, applications DESC\n    `;\n    \n    const result = await pool.query(query);\n    \n    const pdfData = {\n      recruiters: result.rows,\n      period: period.charAt(0).toUpperCase() + period.slice(1)\n    };\n    \n    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'performance');\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"performance-report-${period}-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating performance PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\n// Generate applications PDF report\nrouter.post('/applications', authenticateToken, async (req, res) => {\n  try {\n    const { status, recruiterId, dateFrom, dateTo } = req.body;\n    const userId = req.headers['x-user-id'];\n    const userRole = req.headers['x-user-role'];\n    \n    let query = `\n      SELECT \n        a.*,\n        c.name as candidate_name,\n        u.name as recruiter_name\n      FROM applications a\n      JOIN candidates c ON a.candidate_id = c.id\n      LEFT JOIN users u ON a.recruiter_id = u.id\n      WHERE 1=1\n    `;\n    const params = [];\n    let paramIndex = 1;\n    \n    // Non-admin users can only see their applications\n    if (userRole !== 'Admin' && userId) {\n      query += ` AND a.recruiter_id = $${paramIndex++}`;\n      params.push(userId);\n    }\n    \n    if (status) {\n      query += ` AND a.status = $${paramIndex++}`;\n      params.push(status);\n    }\n    \n    if (recruiterId && userRole === 'Admin') {\n      query += ` AND a.recruiter_id = $${paramIndex++}`;\n      params.push(recruiterId);\n    }\n    \n    if (dateFrom) {\n      query += ` AND a.applied_date >= $${paramIndex++}`;\n      params.push(dateFrom);\n    }\n    \n    if (dateTo) {\n      query += ` AND a.applied_date <= $${paramIndex++}`;\n      params.push(dateTo);\n    }\n    \n    query += ` ORDER BY a.applied_date DESC`;\n    \n    const result = await pool.query(query, params);\n    \n    const pdfData = {\n      applications: result.rows,\n      period: dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : 'All Time'\n    };\n    \n    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'applications');\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"applications-report-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating applications PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\n// Generate interviews PDF report\nrouter.post('/interviews', authenticateToken, async (req, res) => {\n  try {\n    const { status, type, dateFrom, dateTo } = req.body;\n    const userId = req.headers['x-user-id'];\n    const userRole = req.headers['x-user-role'];\n    \n    let query = `\n      SELECT \n        i.*,\n        c.name as candidate_name,\n        u.name as recruiter_name,\n        comp.name as company_name\n      FROM interviews i\n      JOIN candidates c ON i.candidate_id = c.id\n      LEFT JOIN users u ON i.recruiter_id = u.id\n      LEFT JOIN applications a ON i.application_id = a.id\n      LEFT JOIN companies comp ON a.company_id = comp.id\n      WHERE 1=1\n    `;\n    const params = [];\n    let paramIndex = 1;\n    \n    // Non-admin users can only see their interviews\n    if (userRole !== 'Admin' && userId) {\n      query += ` AND i.recruiter_id = $${paramIndex++}`;\n      params.push(userId);\n    }\n    \n    if (status) {\n      query += ` AND i.status = $${paramIndex++}`;\n      params.push(status);\n    }\n    \n    if (type) {\n      query += ` AND i.type = $${paramIndex++}`;\n      params.push(type);\n    }\n    \n    if (dateFrom) {\n      query += ` AND i.interview_date >= $${paramIndex++}`;\n      params.push(dateFrom);\n    }\n    \n    if (dateTo) {\n      query += ` AND i.interview_date <= $${paramIndex++}`;\n      params.push(dateTo);\n    }\n    \n    query += ` ORDER BY i.interview_date DESC`;\n    \n    const result = await pool.query(query, params);\n    \n    const pdfData = {\n      interviews: result.rows,\n      period: dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : 'All Time'\n    };\n    \n    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'interviews');\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"interviews-report-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating interviews PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\n// Generate custom report\nrouter.post('/custom', authenticateToken, async (req, res) => {\n  try {\n    const { reportType, data, options } = req.body;\n    \n    if (!reportType || !data) {\n      return res.status(400).json({ message: 'Report type and data are required' });\n    }\n    \n    const pdfBuffer = await pdfService.generatePDFReport(data, reportType, options);\n    \n    res.setHeader('Content-Type', 'application/pdf');\n    res.setHeader('Content-Disposition', `attachment; filename=\"custom-report-${new Date().toISOString().split('T')[0]}.pdf\"`);\n    res.send(pdfBuffer);\n    \n  } catch (error) {\n    console.error('Error generating custom PDF:', error);\n    res.status(500).json({ message: 'Error generating PDF report' });\n  }\n});\n\nmodule.exports = router;
+﻿const express = require('express');
+const router = express.Router();
+const pdfService = require('../services/pdfService');
+const { pool } = require('../db');
+
+// Middleware to check authentication
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  
+  if (!token) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  
+  // For now, we'll use a simple token check. In production, use proper JWT verification
+  if (token !== 'session') {
+    return res.status(403).json({ message: 'Invalid token' });
+  }
+  
+  next();
+};
+
+// Admin-only middleware
+const requireAdmin = (req, res, next) => {
+  const userRole = req.headers['x-user-role'];
+  if (userRole !== 'Admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  next();
+};
+
+// Generate attendance PDF report
+router.post('/attendance', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { dateFrom, dateTo, userId } = req.body;
+    
+    let query = `
+      SELECT 
+        a.*,
+        u.name as user_name,
+        u.email as user_email
+      FROM attendance a
+      JOIN users u ON a.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+    
+    if (dateFrom) {
+      query += ` AND a.attendance_date >= $${paramIndex++}`;
+      params.push(dateFrom);
+    }
+    
+    if (dateTo) {
+      query += ` AND a.attendance_date <= $${paramIndex++}`;
+      params.push(dateTo);
+    }
+    
+    if (userId) {
+      query += ` AND a.user_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+    
+    query += ` ORDER BY a.attendance_date DESC, u.name`;
+    
+    const result = await pool.query(query, params);
+    
+    const pdfData = {
+      dateFrom,
+      dateTo,
+      records: result.rows
+    };
+    
+    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'attendance');
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="attendance-report-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating attendance PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+// Generate candidates PDF report
+router.post('/candidates', authenticateToken, async (req, res) => {
+  try {
+    const { stage, recruiterId, dateFrom, dateTo } = req.body;
+    const userId = req.headers['x-user-id'];
+    const userRole = req.headers['x-user-role'];
+    
+    let query = `
+      SELECT 
+        c.*,
+        u.name as recruiter_name
+      FROM candidates c
+      LEFT JOIN users u ON c.recruiter_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+    
+    // Non-admin users can only see their assigned candidates
+    if (userRole !== 'Admin' && userId) {
+      query += ` AND c.recruiter_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+    
+    if (stage) {
+      query += ` AND c.stage = $${paramIndex++}`;
+      params.push(stage);
+    }
+    
+    if (recruiterId && userRole === 'Admin') {
+      query += ` AND c.recruiter_id = $${paramIndex++}`;
+      params.push(recruiterId);
+    }
+    
+    if (dateFrom) {
+      query += ` AND c.created_at >= $${paramIndex++}`;
+      params.push(dateFrom);
+    }
+    
+    if (dateTo) {
+      query += ` AND c.created_at <= $${paramIndex++}`;
+      params.push(dateTo);
+    }
+    
+    query += ` ORDER BY c.created_at DESC`;
+    
+    const result = await pool.query(query, params);
+    
+    const pdfData = {
+      candidates: result.rows,
+      filters: { stage, recruiterId, dateFrom, dateTo }
+    };
+    
+    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'candidates');
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="candidates-report-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating candidates PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+// Generate performance PDF report
+router.post('/performance', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { period = 'monthly', dateFrom, dateTo } = req.body;
+    
+    let dateFilter = '';
+    if (period === 'monthly') {
+      dateFilter = `AND da.activity_date >= NOW() - INTERVAL '1 month'`;
+    } else if (period === 'weekly') {
+      dateFilter = `AND da.activity_date >= NOW() - INTERVAL '1 week'`;
+    } else if (dateFrom && dateTo) {
+      dateFilter = `AND da.activity_date BETWEEN '${dateFrom}' AND '${dateTo}'`;
+    }
+    
+    const query = `
+      SELECT 
+        u.id,
+        u.name,
+        u.email,
+        COALESCE(SUM(CASE WHEN da.applications_submitted > 0 THEN da.applications_submitted ELSE 0 END), 0) as applications,
+        COALESCE(SUM(CASE WHEN da.interviews_scheduled > 0 THEN da.interviews_scheduled ELSE 0 END), 0) as interviews,
+        COALESCE(SUM(CASE WHEN da.candidates_placed > 0 THEN da.candidates_placed ELSE 0 END), 0) as placements
+      FROM users u
+      LEFT JOIN daily_activity da ON u.id = da.user_id ${dateFilter}
+      WHERE u.role = 'Recruiter'
+      GROUP BY u.id, u.name, u.email
+      ORDER BY placements DESC, applications DESC
+    `;
+    
+    const result = await pool.query(query);
+    
+    const pdfData = {
+      recruiters: result.rows,
+      period: period.charAt(0).toUpperCase() + period.slice(1)
+    };
+    
+    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'performance');
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="performance-report-${period}-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating performance PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+// Generate applications PDF report
+router.post('/applications', authenticateToken, async (req, res) => {
+  try {
+    const { status, recruiterId, dateFrom, dateTo } = req.body;
+    const userId = req.headers['x-user-id'];
+    const userRole = req.headers['x-user-role'];
+    
+    let query = `
+      SELECT 
+        a.*,
+        c.name as candidate_name,
+        u.name as recruiter_name
+      FROM applications a
+      JOIN candidates c ON a.candidate_id = c.id
+      LEFT JOIN users u ON a.recruiter_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+    
+    // Non-admin users can only see their applications
+    if (userRole !== 'Admin' && userId) {
+      query += ` AND a.recruiter_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+    
+    if (status) {
+      query += ` AND a.status = $${paramIndex++}`;
+      params.push(status);
+    }
+    
+    if (recruiterId && userRole === 'Admin') {
+      query += ` AND a.recruiter_id = $${paramIndex++}`;
+      params.push(recruiterId);
+    }
+    
+    if (dateFrom) {
+      query += ` AND a.applied_date >= $${paramIndex++}`;
+      params.push(dateFrom);
+    }
+    
+    if (dateTo) {
+      query += ` AND a.applied_date <= $${paramIndex++}`;
+      params.push(dateTo);
+    }
+    
+    query += ` ORDER BY a.applied_date DESC`;
+    
+    const result = await pool.query(query, params);
+    
+    const pdfData = {
+      applications: result.rows,
+      period: dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : 'All Time'
+    };
+    
+    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'applications');
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="applications-report-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating applications PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+// Generate interviews PDF report
+router.post('/interviews', authenticateToken, async (req, res) => {
+  try {
+    const { status, type, dateFrom, dateTo } = req.body;
+    const userId = req.headers['x-user-id'];
+    const userRole = req.headers['x-user-role'];
+    
+    let query = `
+      SELECT 
+        i.*,
+        c.name as candidate_name,
+        u.name as recruiter_name,
+        comp.name as company_name
+      FROM interviews i
+      JOIN candidates c ON i.candidate_id = c.id
+      LEFT JOIN users u ON i.recruiter_id = u.id
+      LEFT JOIN applications a ON i.application_id = a.id
+      LEFT JOIN companies comp ON a.company_id = comp.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramIndex = 1;
+    
+    // Non-admin users can only see their interviews
+    if (userRole !== 'Admin' && userId) {
+      query += ` AND i.recruiter_id = $${paramIndex++}`;
+      params.push(userId);
+    }
+    
+    if (status) {
+      query += ` AND i.status = $${paramIndex++}`;
+      params.push(status);
+    }
+    
+    if (type) {
+      query += ` AND i.type = $${paramIndex++}`;
+      params.push(type);
+    }
+    
+    if (dateFrom) {
+      query += ` AND i.interview_date >= $${paramIndex++}`;
+      params.push(dateFrom);
+    }
+    
+    if (dateTo) {
+      query += ` AND i.interview_date <= $${paramIndex++}`;
+      params.push(dateTo);
+    }
+    
+    query += ` ORDER BY i.interview_date DESC`;
+    
+    const result = await pool.query(query, params);
+    
+    const pdfData = {
+      interviews: result.rows,
+      period: dateFrom && dateTo ? `${dateFrom} to ${dateTo}` : 'All Time'
+    };
+    
+    const pdfBuffer = await pdfService.generatePDFReport(pdfData, 'interviews');
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="interviews-report-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating interviews PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+// Generate custom report
+router.post('/custom', authenticateToken, async (req, res) => {
+  try {
+    const { reportType, data, options } = req.body;
+    
+    if (!reportType || !data) {
+      return res.status(400).json({ message: 'Report type and data are required' });
+    }
+    
+    const pdfBuffer = await pdfService.generatePDFReport(data, reportType, options);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="custom-report-${new Date().toISOString().split('T')[0]}.pdf"`);
+    res.send(pdfBuffer);
+    
+  } catch (error) {
+    console.error('Error generating custom PDF:', error);
+    res.status(500).json({ message: 'Error generating PDF report' });
+  }
+});
+
+module.exports = router;
+

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Home,
   Users,
   UserCheck,
@@ -21,3 +21,4 @@ export const getAdminSidebarLinks = () => [
   { href: '/alerts', label: 'Alerts', icon: AlertTriangle },
   { href: '/profile', label: 'My Profile', icon: CircleUser },
 ];
+

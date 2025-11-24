@@ -1,4 +1,4 @@
-import '../styles/globals.css';
+﻿import '../styles/globals.css';
 import Head from 'next/head';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
@@ -7,6 +7,7 @@ import { configureAnalytics, flushAnalytics, track } from '../lib/analytics';
 import API_URL from '../lib/api';
 import { ThemeProvider } from '../lib/theme';
 import { ToastProvider } from '../components/ui/toast-provider';
+import ErrorBoundary from '../components/ErrorBoundary';
 
 function MyApp({ Component, pageProps }) {
   const [queryClient] = useState(
@@ -110,7 +111,9 @@ function MyApp({ Component, pageProps }) {
       </Head>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          <Component {...pageProps} />
+          <ErrorBoundary>
+            <Component {...pageProps} />
+          </ErrorBoundary>
           <ToastProvider />
         </ThemeProvider>
       </QueryClientProvider>
@@ -119,5 +122,6 @@ function MyApp({ Component, pageProps }) {
 }
 
 export default MyApp;
+
 
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import {
   ShieldCheck,
@@ -9,6 +9,7 @@ import {
   EyeOff,
   Loader2,
   Sparkles,
+  CheckCircle,
 } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -415,3 +416,4 @@ const LoginPage = () => {
 };
 
 export default LoginPage;
+

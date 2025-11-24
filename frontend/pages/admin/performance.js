@@ -1,1 +1,284 @@
-import React, { useState, useEffect } from 'react';\nimport { useRouter } from 'next/router';\nimport { TrendingUp, Users, Calendar, Download, BarChart3, PieChart, Activity } from 'lucide-react';\nimport { Card } from '../../components/ui/card';\nimport { Button } from '../../components/ui/button';\nimport { Badge } from '../../components/ui/badge';\nimport PDFExportButton from '../../components/ui/pdf-export-button';\nimport PDFExportPanel from '../../components/ui/pdf-export-panel';\nimport { DashboardLayout } from '../../components/Layout/DashboardLayout';\nimport API_URL from '../../lib/api';\n\nconst PerformancePage = () => {\n  const router = useRouter();\n  const [token, setToken] = useState('');\n  const [userName, setUserName] = useState('Admin');\n  const [performanceData, setPerformanceData] = useState(null);\n  const [loading, setLoading] = useState(true);\n  const [selectedPeriod, setSelectedPeriod] = useState('monthly');\n  const [showExportPanel, setShowExportPanel] = useState(false);\n\n  useEffect(() => {\n    const storedToken = localStorage.getItem('token');\n    const storedRole = localStorage.getItem('userRole');\n    const storedName = localStorage.getItem('userName');\n    \n    if (!storedToken) {\n      router.push('/login');\n      return;\n    }\n    \n    if (storedRole !== 'Admin') {\n      router.replace('/recruiter');\n      return;\n    }\n    \n    setToken(storedToken);\n    setUserName(storedName || 'Admin');\n  }, [router]);\n\n  useEffect(() => {\n    if (!token) return;\n    \n    const fetchPerformanceData = async () => {\n      try {\n        const response = await fetch(`${API_URL}/api/v1/reports/performance`, {\n          headers: {\n            'Authorization': `Bearer ${token}`,\n            'Content-Type': 'application/json'\n          }\n        });\n        \n        if (response.ok) {\n          const data = await response.json();\n          setPerformanceData(data);\n        }\n      } catch (error) {\n        console.error('Error fetching performance data:', error);\n      } finally {\n        setLoading(false);\n      }\n    };\n    \n    fetchPerformanceData();\n  }, [token]);\n\n  const getAdminSidebarLinks = () => [\n    { href: '/admin', label: 'Dashboard', icon: TrendingUp },\n    { href: '/admin/candidates', label: 'Candidates', icon: Users },\n    { href: '/admin/attendance', label: 'Attendance', icon: Calendar },\n    { href: '/admin/performance', label: 'Performance', icon: BarChart3 },\n    { href: '/admin/reports', label: 'Reports', icon: Download },\n    { href: '/alerts', label: 'Alerts', icon: Activity },\n  ];\n\n  const handleLogout = () => {\n    localStorage.removeItem('token');\n    localStorage.removeItem('userName');\n    localStorage.removeItem('userRole');\n    router.push('/login');\n  };\n\n  const calculateMetrics = (data) => {\n    if (!data || !data.recruiters) return { total: 0, avgApps: 0, avgInterviews: 0, avgPlacements: 0 };\n    \n    const recruiters = data.recruiters;\n    const total = recruiters.length;\n    const avgApps = Math.round(recruiters.reduce((sum, r) => sum + (r.applications || 0), 0) / total);\n    const avgInterviews = Math.round(recruiters.reduce((sum, r) => sum + (r.interviews || 0), 0) / total);\n    const avgPlacements = Math.round(recruiters.reduce((sum, r) => sum + (r.placements || 0), 0) / total);\n    \n    return { total, avgApps, avgInterviews, avgPlacements };\n  };\n\n  const getPerformanceCategory = (placements, applications) => {\n    if (!applications || applications === 0) return 'No Data';\n    const conversionRate = (placements / applications) * 100;\n    \n    if (conversionRate >= 15) return { category: 'Excellent', color: 'bg-emerald-100 text-emerald-800' };\n    if (conversionRate >= 10) return { category: 'Good', color: 'bg-blue-100 text-blue-800' };\n    if (conversionRate >= 5) return { category: 'Average', color: 'bg-yellow-100 text-yellow-800' };\n    return { category: 'Poor', color: 'bg-red-100 text-red-800' };\n  };\n\n  const metrics = calculateMetrics(performanceData);\n\n  return (\n    <DashboardLayout\n      title=\"Performance Analytics\"\n      subtitle=\"Recruiter performance metrics and conversion rates\"\n      links={getAdminSidebarLinks()}\n      actions={\n        <div className=\"flex gap-2\">\n          <PDFExportButton\n            reportType=\"performance\"\n            data={{ period: selectedPeriod }}\n            filename=\"performance-analytics\"\n            variant=\"outline\"\n            size=\"sm\"\n          />\n          <Button variant=\"outline\" onClick={handleLogout}>\n            Logout\n          </Button>\n        </div>\n      }\n    >\n      <div className=\"space-y-6\">\n        {/* Key Metrics */}\n        <div className=\"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6\">\n          <Card className=\"p-6\">\n            <div className=\"flex items-center justify-between\">\n              <div>\n                <p className=\"text-sm font-medium text-muted-foreground\">Total Recruiters</p>\n                <p className=\"text-2xl font-bold\">{metrics.total}</p>\n              </div>\n              <Users className=\"h-8 w-8 text-blue-500\" />\n            </div>\n          </Card>\n          \n          <Card className=\"p-6\">\n            <div className=\"flex items-center justify-between\">\n              <div>\n                <p className=\"text-sm font-medium text-muted-foreground\">Avg Applications</p>\n                <p className=\"text-2xl font-bold\">{metrics.avgApps}</p>\n              </div>\n              <BarChart3 className=\"h-8 w-8 text-green-500\" />\n            </div>\n          </Card>\n          \n          <Card className=\"p-6\">\n            <div className=\"flex items-center justify-between\">\n              <div>\n                <p className=\"text-sm font-medium text-muted-foreground\">Avg Interviews</p>\n                <p className=\"text-2xl font-bold\">{metrics.avgInterviews}</p>\n              </div>\n              <Activity className=\"h-8 w-8 text-purple-500\" />\n            </div>\n          </Card>\n          \n          <Card className=\"p-6\">\n            <div className=\"flex items-center justify-between\">\n              <div>\n                <p className=\"text-sm font-medium text-muted-foreground\">Avg Placements</p>\n                <p className=\"text-2xl font-bold\">{metrics.avgPlacements}</p>\n              </div>\n              <TrendingUp className=\"h-8 w-8 text-orange-500\" />\n            </div>\n          </Card>\n        </div>\n\n        {/* Period Selector */}\n        <Card className=\"p-6\">\n          <div className=\"flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4\">\n            <div>\n              <h3 className=\"text-lg font-semibold\">Performance Period</h3>\n              <p className=\"text-sm text-muted-foreground\">Select time period for analysis</p>\n            </div>\n            <div className=\"flex gap-2\">\n              {['weekly', 'monthly', 'quarterly', 'yearly'].map(period => (\n                <Button\n                  key={period}\n                  variant={selectedPeriod === period ? 'default' : 'outline'}\n                  size=\"sm\"\n                  onClick={() => setSelectedPeriod(period)}\n                >\n                  {period.charAt(0).toUpperCase() + period.slice(1)}\n                </Button>\n              ))}\n            </div>\n          </div>\n        </Card>\n\n        {/* Performance Table */}\n        <Card className=\"p-6\">\n          <div className=\"flex items-center justify-between mb-6\">\n            <h3 className=\"text-lg font-semibold\">Recruiter Performance Details</h3>\n            <Button\n              variant=\"outline\"\n              onClick={() => setShowExportPanel(!showExportPanel)}\n            >\n              <Download className=\"h-4 w-4 mr-2\" />\n              Advanced Export\n            </Button>\n          </div>\n          \n          {loading ? (\n            <div className=\"text-center py-8\">\n              <p className=\"text-muted-foreground\">Loading performance data...</p>\n            </div>\n          ) : performanceData?.recruiters ? (\n            <div className=\"overflow-x-auto\">\n              <table className=\"w-full\">\n                <thead>\n                  <tr className=\"border-b\">\n                    <th className=\"text-left py-3 px-4 font-medium\">Recruiter</th>\n                    <th className=\"text-center py-3 px-4 font-medium\">Applications</th>\n                    <th className=\"text-center py-3 px-4 font-medium\">Interviews</th>\n                    <th className=\"text-center py-3 px-4 font-medium\">Placements</th>\n                    <th className=\"text-center py-3 px-4 font-medium\">Conversion Rate</th>\n                    <th className=\"text-center py-3 px-4 font-medium\">Performance</th>\n                  </tr>\n                </thead>\n                <tbody>\n                  {performanceData.recruiters\n                    .sort((a, b) => (b.placements || 0) - (a.placements || 0))\n                    .map((recruiter, index) => {\n                      const conversionRate = recruiter.applications > 0 \n                        ? ((recruiter.placements / recruiter.applications) * 100).toFixed(1)\n                        : '0';\n                      const performance = getPerformanceCategory(recruiter.placements, recruiter.applications);\n                      \n                      return (\n                        <tr key={recruiter.id} className=\"border-b hover:bg-muted/50\">\n                          <td className=\"py-3 px-4\">\n                            <div>\n                              <p className=\"font-medium\">{recruiter.name}</p>\n                              <p className=\"text-sm text-muted-foreground\">{recruiter.email}</p>\n                            </div>\n                          </td>\n                          <td className=\"text-center py-3 px-4\">\n                            <span className=\"font-medium\">{recruiter.applications || 0}</span>\n                          </td>\n                          <td className=\"text-center py-3 px-4\">\n                            <span className=\"font-medium\">{recruiter.interviews || 0}</span>\n                          </td>\n                          <td className=\"text-center py-3 px-4\">\n                            <span className=\"font-medium text-green-600\">{recruiter.placements || 0}</span>\n                          </td>\n                          <td className=\"text-center py-3 px-4\">\n                            <span className=\"font-medium\">{conversionRate}%</span>\n                          </td>\n                          <td className=\"text-center py-3 px-4\">\n                            <Badge className={performance.color}>\n                              {performance.category}\n                            </Badge>\n                          </td>\n                        </tr>\n                      );\n                    })}\n                </tbody>\n              </table>\n            </div>\n          ) : (\n            <div className=\"text-center py-8\">\n              <p className=\"text-muted-foreground\">No performance data available</p>\n            </div>\n          )}\n        </Card>\n\n        {/* Advanced Export Panel */}\n        {showExportPanel && (\n          <PDFExportPanel\n            reportType=\"performance\"\n            className=\"max-w-2xl mx-auto\"\n          />\n        )}\n      </div>\n    </DashboardLayout>\n  );\n};\n\nexport default PerformancePage;
+﻿import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import { TrendingUp, Users, Calendar, Download, BarChart3, PieChart, Activity } from 'lucide-react';
+import { Card } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import PDFExportButton from '../../components/ui/pdf-export-button';
+import PDFExportPanel from '../../components/ui/pdf-export-panel';
+import { DashboardLayout } from '../../components/Layout/DashboardLayout';
+import API_URL from '../../lib/api';
+
+const PerformancePage = () => {
+  const router = useRouter();
+  const [token, setToken] = useState('');
+  const [userName, setUserName] = useState('Admin');
+  const [performanceData, setPerformanceData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedPeriod, setSelectedPeriod] = useState('monthly');
+  const [showExportPanel, setShowExportPanel] = useState(false);
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('token');
+    const storedRole = localStorage.getItem('userRole');
+    const storedName = localStorage.getItem('userName');
+    
+    if (!storedToken) {
+      router.push('/login');
+      return;
+    }
+    
+    if (storedRole !== 'Admin') {
+      router.replace('/recruiter');
+      return;
+    }
+    
+    setToken(storedToken);
+    setUserName(storedName || 'Admin');
+  }, [router]);
+
+  useEffect(() => {
+    if (!token) return;
+    
+    const fetchPerformanceData = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/v1/reports/performance`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setPerformanceData(data);
+        }
+      } catch (error) {
+        console.error('Error fetching performance data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchPerformanceData();
+  }, [token]);
+
+  const getAdminSidebarLinks = () => [
+    { href: '/admin', label: 'Dashboard', icon: TrendingUp },
+    { href: '/admin/candidates', label: 'Candidates', icon: Users },
+    { href: '/admin/attendance', label: 'Attendance', icon: Calendar },
+    { href: '/admin/performance', label: 'Performance', icon: BarChart3 },
+    { href: '/admin/reports', label: 'Reports', icon: Download },
+    { href: '/alerts', label: 'Alerts', icon: Activity },
+  ];
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userName');
+    localStorage.removeItem('userRole');
+    router.push('/login');
+  };
+
+  const calculateMetrics = (data) => {
+    if (!data || !data.recruiters) return { total: 0, avgApps: 0, avgInterviews: 0, avgPlacements: 0 };
+    
+    const recruiters = data.recruiters;
+    const total = recruiters.length;
+    const avgApps = Math.round(recruiters.reduce((sum, r) => sum + (r.applications || 0), 0) / total);
+    const avgInterviews = Math.round(recruiters.reduce((sum, r) => sum + (r.interviews || 0), 0) / total);
+    const avgPlacements = Math.round(recruiters.reduce((sum, r) => sum + (r.placements || 0), 0) / total);
+    
+    return { total, avgApps, avgInterviews, avgPlacements };
+  };
+
+  const getPerformanceCategory = (placements, applications) => {
+    if (!applications || applications === 0) return 'No Data';
+    const conversionRate = (placements / applications) * 100;
+    
+    if (conversionRate >= 15) return { category: 'Excellent', color: 'bg-emerald-100 text-emerald-800' };
+    if (conversionRate >= 10) return { category: 'Good', color: 'bg-blue-100 text-blue-800' };
+    if (conversionRate >= 5) return { category: 'Average', color: 'bg-yellow-100 text-yellow-800' };
+    return { category: 'Poor', color: 'bg-red-100 text-red-800' };
+  };
+
+  const metrics = calculateMetrics(performanceData);
+
+  return (
+    <DashboardLayout
+      title="Performance Analytics"
+      subtitle="Recruiter performance metrics and conversion rates"
+      links={getAdminSidebarLinks()}
+      actions={
+        <div className="flex gap-2">
+          <PDFExportButton
+            reportType="performance"
+            data={{ period: selectedPeriod }}
+            filename="performance-analytics"
+            variant="outline"
+            size="sm"
+          />
+          <Button variant="outline" onClick={handleLogout}>
+            Logout
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-6">
+        {/* Key Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Total Recruiters</p>
+                <p className="text-2xl font-bold">{metrics.total}</p>
+              </div>
+              <Users className="h-8 w-8 text-blue-500" />
+            </div>
+          </Card>
+          
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Avg Applications</p>
+                <p className="text-2xl font-bold">{metrics.avgApps}</p>
+              </div>
+              <BarChart3 className="h-8 w-8 text-green-500" />
+            </div>
+          </Card>
+          
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Avg Interviews</p>
+                <p className="text-2xl font-bold">{metrics.avgInterviews}</p>
+              </div>
+              <Activity className="h-8 w-8 text-purple-500" />
+            </div>
+          </Card>
+          
+          <Card className="p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">Avg Placements</p>
+                <p className="text-2xl font-bold">{metrics.avgPlacements}</p>
+              </div>
+              <TrendingUp className="h-8 w-8 text-orange-500" />
+            </div>
+          </Card>
+        </div>
+
+        {/* Period Selector */}
+        <Card className="p-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold">Performance Period</h3>
+              <p className="text-sm text-muted-foreground">Select time period for analysis</p>
+            </div>
+            <div className="flex gap-2">
+              {['weekly', 'monthly', 'quarterly', 'yearly'].map(period => (
+                <Button
+                  key={period}
+                  variant={selectedPeriod === period ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setSelectedPeriod(period)}
+                >
+                  {period.charAt(0).toUpperCase() + period.slice(1)}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        {/* Performance Table */}
+        <Card className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-semibold">Recruiter Performance Details</h3>
+            <Button
+              variant="outline"
+              onClick={() => setShowExportPanel(!showExportPanel)}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Advanced Export
+            </Button>
+          </div>
+          
+          {loading ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">Loading performance data...</p>
+            </div>
+          ) : performanceData?.recruiters ? (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left py-3 px-4 font-medium">Recruiter</th>
+                    <th className="text-center py-3 px-4 font-medium">Applications</th>
+                    <th className="text-center py-3 px-4 font-medium">Interviews</th>
+                    <th className="text-center py-3 px-4 font-medium">Placements</th>
+                    <th className="text-center py-3 px-4 font-medium">Conversion Rate</th>
+                    <th className="text-center py-3 px-4 font-medium">Performance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {performanceData.recruiters
+                    .sort((a, b) => (b.placements || 0) - (a.placements || 0))
+                    .map((recruiter, index) => {
+                      const conversionRate = recruiter.applications > 0 
+                        ? ((recruiter.placements / recruiter.applications) * 100).toFixed(1)
+                        : '0';
+                      const performance = getPerformanceCategory(recruiter.placements, recruiter.applications);
+                      
+                      return (
+                        <tr key={recruiter.id} className="border-b hover:bg-muted/50">
+                          <td className="py-3 px-4">
+                            <div>
+                              <p className="font-medium">{recruiter.name}</p>
+                              <p className="text-sm text-muted-foreground">{recruiter.email}</p>
+                            </div>
+                          </td>
+                          <td className="text-center py-3 px-4">
+                            <span className="font-medium">{recruiter.applications || 0}</span>
+                          </td>
+                          <td className="text-center py-3 px-4">
+                            <span className="font-medium">{recruiter.interviews || 0}</span>
+                          </td>
+                          <td className="text-center py-3 px-4">
+                            <span className="font-medium text-green-600">{recruiter.placements || 0}</span>
+                          </td>
+                          <td className="text-center py-3 px-4">
+                            <span className="font-medium">{conversionRate}%</span>
+                          </td>
+                          <td className="text-center py-3 px-4">
+                            <Badge className={performance.color}>
+                              {performance.category}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground">No performance data available</p>
+            </div>
+          )}
+        </Card>
+
+        {/* Advanced Export Panel */}
+        {showExportPanel && (
+          <PDFExportPanel
+            reportType="performance"
+            className="max-w-2xl mx-auto"
+          />
+        )}
+      </div>
+    </DashboardLayout>
+  );
+};
+
+export default PerformancePage;
+
+
+

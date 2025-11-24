@@ -1,4 +1,4 @@
-const defaultDateOptions = { dateStyle: 'medium' };
+﻿const defaultDateOptions = { dateStyle: 'medium' };
 const defaultDateTimeOptions = { dateStyle: 'medium', timeStyle: 'short' };
 
 export function formatLabel(value, fallback = '--') {
@@ -32,3 +32,4 @@ export function formatDateTime(value, options = defaultDateTimeOptions) {
     return String(value);
   }
 }
+

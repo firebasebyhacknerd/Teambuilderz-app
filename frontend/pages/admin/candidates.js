@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Plus,
@@ -938,3 +938,4 @@ const CandidateDialog = ({ token, open, candidate, recruiters, error, isSaving, 
 };
 
 export default AdminCandidates;
+

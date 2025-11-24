@@ -1,1 +1,205 @@
-import React, { useState } from 'react';\nimport { Calendar, Filter, Download, Loader2, FileText } from 'lucide-react';\nimport { Button } from './button';\nimport { Input } from './input';\nimport { Label } from './label';\nimport { Card } from './card';\nimport PDFExportButton from './pdf-export-button';\nimport { motion, AnimatePresence } from 'framer-motion';\n\nconst PDFExportPanel = ({ \n  reportType, \n  availableFilters = {},\n  className = '' \n}) => {\n  const [filters, setFilters] = useState({});\n  const [isAdvancedMode, setIsAdvancedMode] = useState(false);\n\n  const handleFilterChange = (key, value) => {\n    setFilters(prev => ({\n      ...prev,\n      [key]: value\n    }));\n  };\n\n  const resetFilters = () => {\n    setFilters({});\n  };\n\n  const getReportTypeName = (type) => {\n    const names = {\n      attendance: 'Attendance Report',\n      candidates: 'Candidates Pipeline',\n      performance: 'Performance Analytics',\n      applications: 'Applications Tracking',\n      interviews: 'Interviews Schedule'\n    };\n    return names[type] || 'Report';\n  };\n\n  const renderFilterInputs = () => {\n    const filterConfigs = {\n      attendance: [\n        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },\n        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar },\n        { key: 'userId', label: 'Employee ID', type: 'number', icon: Filter }\n      ],\n      candidates: [\n        { key: 'stage', label: 'Stage', type: 'select', options: ['onboarding', 'marketing', 'interviewing', 'offered', 'placed'] },\n        { key: 'recruiterId', label: 'Recruiter ID', type: 'number', icon: Filter },\n        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },\n        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }\n      ],\n      performance: [\n        { key: 'period', label: 'Period', type: 'select', options: ['weekly', 'monthly', 'quarterly', 'yearly'] },\n        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },\n        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }\n      ],\n      applications: [\n        { key: 'status', label: 'Status', type: 'select', options: ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'] },\n        { key: 'recruiterId', label: 'Recruiter ID', type: 'number', icon: Filter },\n        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },\n        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }\n      ],\n      interviews: [\n        { key: 'status', label: 'Status', type: 'select', options: ['scheduled', 'completed', 'feedback_pending', 'advanced', 'rejected'] },\n        { key: 'type', label: 'Type', type: 'select', options: ['phone_screen', 'technical', 'behavioral', 'final'] },\n        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },\n        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }\n      ]\n    };\n\n    const configs = filterConfigs[reportType] || [];\n\n    return configs.map(config => {\n      const Icon = config.icon || Filter;\n      return (\n        <div key={config.key} className=\"space-y-2\">\n          <Label htmlFor={config.key} className=\"text-sm font-medium flex items-center gap-2\">\n            <Icon className=\"h-4 w-4\" />\n            {config.label}\n          </Label>\n          \n          {config.type === 'select' ? (\n            <select\n              id={config.key}\n              value={filters[config.key] || ''}\n              onChange={(e) => handleFilterChange(config.key, e.target.value)}\n              className=\"w-full px-3 py-2 border border-input bg-background rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary\"\n            >\n              <option value=\"\">All</option>\n              {config.options?.map(option => (\n                <option key={option} value={option}>\n                  {option.charAt(0).toUpperCase() + option.slice(1).replace(/_/g, ' ')}\n                </option>\n              ))}\n            </select>\n          ) : (\n            <Input\n              id={config.key}\n              type={config.type}\n              value={filters[config.key] || ''}\n              onChange={(e) => handleFilterChange(config.key, e.target.value)}\n              placeholder={`Enter ${config.label.toLowerCase()}`}\n            />\n          )}\n        </div>\n      );\n    });\n  };\n\n  return (\n    <Card className={`p-6 space-y-6 ${className}`}>\n      <div className=\"flex items-center justify-between\">\n        <div className=\"flex items-center gap-3\">\n          <FileText className=\"h-5 w-5 text-primary\" />\n          <h3 className=\"text-lg font-semibold\">{getReportTypeName(reportType)}</h3>\n        </div>\n        \n        <Button\n          variant=\"ghost\"\n          size=\"sm\"\n          onClick={() => setIsAdvancedMode(!isAdvancedMode)}\n          className=\"text-primary\"\n        >\n          <Filter className=\"h-4 w-4 mr-2\" />\n          {isAdvancedMode ? 'Simple' : 'Advanced'}\n        </Button>\n      </div>\n\n      {/* Filters */}\n      <AnimatePresence>\n        {isAdvancedMode && (\n          <motion.div\n            initial={{ opacity: 0, height: 0 }}\n            animate={{ opacity: 1, height: 'auto' }}\n            exit={{ opacity: 0, height: 0 }}\n            transition={{ duration: 0.3 }}\n            className=\"space-y-4\"\n          >\n            <div className=\"grid grid-cols-1 md:grid-cols-2 gap-4\">\n              {renderFilterInputs()}\n            </div>\n            \n            <div className=\"flex gap-2\">\n              <Button variant=\"outline\" onClick={resetFilters} size=\"sm\">\n                Reset Filters\n              </Button>\n            </div>\n          </motion.div>\n        )}\n      </AnimatePresence>\n\n      {/* Export Options */}\n      <div className=\"space-y-4\">\n        <div className=\"flex items-center gap-2 text-sm text-muted-foreground\">\n          <Download className=\"h-4 w-4\" />\n          <span>Export Options</span>\n        </div>\n        \n        <div className=\"flex flex-col sm:flex-row gap-3\">\n          <PDFExportButton\n            reportType={reportType}\n            data={filters}\n            filename={`${reportType}-report`}\n            className=\"flex-1\"\n          />\n          \n          {!isAdvancedMode && (\n            <Button variant=\"outline\" onClick={() => setIsAdvancedMode(true)}>\n              <Filter className=\"h-4 w-4 mr-2\" />\n              Add Filters\n            </Button>\n          )}\n        </div>\n        \n        {/* Active filters display */}\n        {Object.keys(filters).length > 0 && (\n          <div className=\"flex flex-wrap gap-2 mt-4\">\n            {Object.entries(filters).map(([key, value]) => (\n              value && (\n                <div\n                  key={key}\n                  className=\"inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs\"\n                >\n                  {key}: {value}\n                  <button\n                    onClick={() => handleFilterChange(key, '')}\n                    className=\"ml-1 hover:text-primary/70\"\n                  >\n                    ×\n                  </button>\n                </div>\n              )\n            ))}\n          </div>\n        )}\n      </div>\n    </Card>\n  );\n};\n\nexport default PDFExportPanel;
+﻿import React, { useState } from 'react';
+import { Calendar, Filter, Download, Loader2, FileText } from 'lucide-react';
+import { Button } from './button';
+import { Input } from './input';
+import { Label } from './label';
+import { Card } from './card';
+import PDFExportButton from './pdf-export-button';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const PDFExportPanel = ({ 
+  reportType, 
+  availableFilters = {},
+  className = '' 
+}) => {
+  const [filters, setFilters] = useState({});
+  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
+
+  const handleFilterChange = (key, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+
+  const resetFilters = () => {
+    setFilters({});
+  };
+
+  const getReportTypeName = (type) => {
+    const names = {
+      attendance: 'Attendance Report',
+      candidates: 'Candidates Pipeline',
+      performance: 'Performance Analytics',
+      applications: 'Applications Tracking',
+      interviews: 'Interviews Schedule'
+    };
+    return names[type] || 'Report';
+  };
+
+  const renderFilterInputs = () => {
+    const filterConfigs = {
+      attendance: [
+        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },
+        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar },
+        { key: 'userId', label: 'Employee ID', type: 'number', icon: Filter }
+      ],
+      candidates: [
+        { key: 'stage', label: 'Stage', type: 'select', options: ['onboarding', 'marketing', 'interviewing', 'offered', 'placed'] },
+        { key: 'recruiterId', label: 'Recruiter ID', type: 'number', icon: Filter },
+        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },
+        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }
+      ],
+      performance: [
+        { key: 'period', label: 'Period', type: 'select', options: ['weekly', 'monthly', 'quarterly', 'yearly'] },
+        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },
+        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }
+      ],
+      applications: [
+        { key: 'status', label: 'Status', type: 'select', options: ['sent', 'viewed', 'shortlisted', 'interviewing', 'offered', 'hired', 'rejected'] },
+        { key: 'recruiterId', label: 'Recruiter ID', type: 'number', icon: Filter },
+        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },
+        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }
+      ],
+      interviews: [
+        { key: 'status', label: 'Status', type: 'select', options: ['scheduled', 'completed', 'feedback_pending', 'advanced', 'rejected'] },
+        { key: 'type', label: 'Type', type: 'select', options: ['phone_screen', 'technical', 'behavioral', 'final'] },
+        { key: 'dateFrom', label: 'From Date', type: 'date', icon: Calendar },
+        { key: 'dateTo', label: 'To Date', type: 'date', icon: Calendar }
+      ]
+    };
+
+    const configs = filterConfigs[reportType] || [];
+
+    return configs.map(config => {
+      const Icon = config.icon || Filter;
+      return (
+        <div key={config.key} className="space-y-2">
+          <Label htmlFor={config.key} className="text-sm font-medium flex items-center gap-2">
+            <Icon className="h-4 w-4" />
+            {config.label}
+          </Label>
+          
+          {config.type === 'select' ? (
+            <select
+              id={config.key}
+              value={filters[config.key] || ''}
+              onChange={(e) => handleFilterChange(config.key, e.target.value)}
+              className="w-full px-3 py-2 border border-input bg-background rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">All</option>
+              {config.options?.map(option => (
+                <option key={option} value={option}>
+                  {option.charAt(0).toUpperCase() + option.slice(1).replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              id={config.key}
+              type={config.type}
+              value={filters[config.key] || ''}
+              onChange={(e) => handleFilterChange(config.key, e.target.value)}
+              placeholder={`Enter ${config.label.toLowerCase()}`}
+            />
+          )}
+        </div>
+      );
+    });
+  };
+
+  return (
+    <Card className={`p-6 space-y-6 ${className}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <FileText className="h-5 w-5 text-primary" />
+          <h3 className="text-lg font-semibold">{getReportTypeName(reportType)}</h3>
+        </div>
+        
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setIsAdvancedMode(!isAdvancedMode)}
+          className="text-primary"
+        >
+          <Filter className="h-4 w-4 mr-2" />
+          {isAdvancedMode ? 'Simple' : 'Advanced'}
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <AnimatePresence>
+        {isAdvancedMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {renderFilterInputs()}
+            </div>
+            
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={resetFilters} size="sm">
+                Reset Filters
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Export Options */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Download className="h-4 w-4" />
+          <span>Export Options</span>
+        </div>
+        
+        <div className="flex flex-col sm:flex-row gap-3">
+          <PDFExportButton
+            reportType={reportType}
+            data={filters}
+            filename={`${reportType}-report`}
+            className="flex-1"
+          />
+          
+          {!isAdvancedMode && (
+            <Button variant="outline" onClick={() => setIsAdvancedMode(true)}>
+              <Filter className="h-4 w-4 mr-2" />
+              Add Filters
+            </Button>
+          )}
+        </div>
+        
+        {/* Active filters display */}
+        {Object.keys(filters).length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-4">
+            {Object.entries(filters).map(([key, value]) => (
+              value && (
+                <div
+                  key={key}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs"
+                >
+                  {key}: {value}
+                  <button
+                    onClick={() => handleFilterChange(key, '')}
+                    className="ml-1 hover:text-primary/70"
+                  >
+                    ×
+                  </button>
+                </div>
+              )
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+};
+
+export default PDFExportPanel;
+
+
+

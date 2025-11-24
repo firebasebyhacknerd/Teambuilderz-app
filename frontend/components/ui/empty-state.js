@@ -1,4 +1,4 @@
-import { cn } from '../../lib/utils';
+﻿import { cn } from '../../lib/utils';
 
 const iconClasses = 'h-12 w-12 text-primary';
 
@@ -31,3 +31,4 @@ export default function EmptyState({
     </div>
   );
 }
+

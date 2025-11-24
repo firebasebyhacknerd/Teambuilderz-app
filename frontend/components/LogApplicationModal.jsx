@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -612,5 +612,6 @@ const LogApplicationModal = ({ token, onApplicationLogged }) => {
 };
 
 export default LogApplicationModal;
+
 
 
