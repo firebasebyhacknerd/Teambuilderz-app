@@ -15,6 +15,7 @@ export const getAdminSidebarLinks = () => [
   { href: '/admin/candidates', label: 'Candidates', icon: Users },
   { href: '/admin/recruiters', label: 'Team Management', icon: UserCheck },
   { href: '/admin/attendance', label: 'Attendance', icon: CalendarCheck },
+  { href: '/admin/reports', label: 'Reports', icon: FileText },
   { href: '/leaderboard', label: 'Leaderboard', icon: TrendingUp },
   { href: '/admin/application-activity', label: 'Application Activity', icon: BarChart3 },
   { href: '/recruiter/applications', label: 'Applications', icon: FileText },

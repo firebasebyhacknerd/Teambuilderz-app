@@ -4,6 +4,7 @@ import { FileText, Users, Calendar, TrendingUp, Briefcase, Phone } from 'lucide-
 import { Card } from '../../components/ui/card';
 import PDFExportPanel from '../../components/ui/pdf-export-panel';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
+import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
 
 const ReportsPage = () => {
   const [selectedReport, setSelectedReport] = useState(null);
@@ -14,7 +15,7 @@ const ReportsPage = () => {
       name: 'Attendance Reports',
       description: 'Export attendance records with date ranges and employee filters',
       icon: Calendar,
-      color: 'bg-blue-500',
+      color: 'bg-tbz-blue',
       adminOnly: true
     },
     {
@@ -22,7 +23,7 @@ const ReportsPage = () => {
       name: 'Candidates Pipeline',
       description: 'Export candidate data with stages and recruiter assignments',
       icon: Users,
-      color: 'bg-green-500',
+      color: 'bg-success',
       adminOnly: false
     },
     {
@@ -30,7 +31,7 @@ const ReportsPage = () => {
       name: 'Performance Analytics',
       description: 'Export recruiter performance metrics and conversion rates',
       icon: TrendingUp,
-      color: 'bg-purple-500',
+      color: 'bg-tbz-orange',
       adminOnly: true
     },
     {
@@ -38,7 +39,7 @@ const ReportsPage = () => {
       name: 'Applications Tracking',
       description: 'Export application status and submission data',
       icon: Briefcase,
-      color: 'bg-orange-500',
+      color: 'bg-warning',
       adminOnly: false
     },
     {
@@ -46,7 +47,7 @@ const ReportsPage = () => {
       name: 'Interviews Schedule',
       description: 'Export interview schedules and status tracking',
       icon: Phone,
-      color: 'bg-red-500',
+      color: 'bg-destructive',
       adminOnly: false
     }
   ];
@@ -57,7 +58,11 @@ const ReportsPage = () => {
     : reportTypes.filter(report => !report.adminOnly);
 
   return (
-    <DashboardLayout title="Reports" subtitle="Export data as PDF documents">
+    <DashboardLayout 
+      title="Reports"
+      subtitle="Generate and export system reports"
+      links={getAdminSidebarLinks()}
+    >
       <div className="space-y-6">
         {/* Report Type Selection */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
