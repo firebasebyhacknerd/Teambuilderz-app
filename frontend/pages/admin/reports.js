@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { FileText, Users, Calendar, TrendingUp, Briefcase, Phone } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import PDFExportPanel from '../../components/ui/pdf-export-panel';
-import { DashboardLayout } from '../../components/Layout/DashboardLayout';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
 
 const ReportsPage = () => {
   const [selectedReport, setSelectedReport] = useState(null);

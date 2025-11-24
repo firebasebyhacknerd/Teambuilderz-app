@@ -114,6 +114,7 @@ const RecruiterDashboard = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [userId, setUserId] = useState(null);
+  const [role, setRole] = useState('Recruiter');
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [weeklyAvg, setWeeklyAvg] = useState(0);
@@ -160,6 +161,10 @@ const RecruiterDashboard = () => {
     if (storedRole && storedRole !== 'Recruiter') {
       router.replace(storedRole === 'Admin' ? '/admin' : '/login');
       return;
+    }
+
+    if (storedRole) {
+      setRole(storedRole);
     }
 
     setToken(storedToken);
@@ -534,7 +539,7 @@ const RecruiterDashboard = () => {
     router.push('/login');
   };
 
-  const sidebarLinks = getSidebarLinks(userRole);
+  const sidebarLinks = getSidebarLinks(role);
 
   if (loading || metricsLoading) {
     return (
@@ -1181,7 +1186,6 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
-
 
 
 

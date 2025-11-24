@@ -1,8 +1,7 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import { useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
+import { Users, Search, ChevronRight, LogOut } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -13,7 +12,6 @@ import { useCandidatesQuery } from '../../lib/queryHooks';
 import useAuthState from '../../lib/useAuthState';
 import API_URL from '../../lib/api';
 import PDFExportButton from '../../components/ui/pdf-export-button';
-import { CardSkeleton } from '../../components/ui/skeleton';
 import EmptyState from '../../components/ui/empty-state';
 import { getSidebarLinks } from '../../lib/sidebarLinks';
 
@@ -35,30 +33,26 @@ const stageLabels = {
   inactive: 'Inactive',
 };
 
-const stageLabel = (value) => {
-  if (!value) return 'Unknown';
-  return stageLabels[value] || value;
-};
-
+const stageLabel = (value) => stageLabels[value] || value || 'Unknown';
 const stageOptions = Object.keys(stageLabels).map((value) => ({ value, label: stageLabel(value) }));
 
 const CandidatesPage = () => {
   const router = useRouter();
-  const { token, userName, userRole, ready, logout } = useAuthState();
+  const { token, userName, userRole, ready } = useAuthState();
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
 
-  // Restore filters from localStorage (once ready)
+  // Restore filters once auth state is ready
   useEffect(() => {
     if (!ready) return;
     try {
       const stored = window.localStorage.getItem('tbz-candidates-filters');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
-        if (parsed.stageFilter) setStageFilter(parsed.stageFilter);
-        if (parsed.assignmentFilter) setAssignmentFilter(parsed.assignmentFilter);
+        setSearchTerm(parsed.searchTerm || '');
+        setStageFilter(parsed.stageFilter || 'all');
+        setAssignmentFilter(parsed.assignmentFilter || 'all');
       }
     } catch (error) {
       console.warn('Unable to restore candidate filters', error);
@@ -81,9 +75,7 @@ const CandidatesPage = () => {
   const { data: candidates = [], isLoading } = useCandidatesQuery(token, Boolean(token));
 
   const filteredCandidates = useMemo(() => {
-    if (!candidates.length) {
-      return [];
-    }
+    if (!candidates.length) return [];
     const term = searchTerm.trim().toLowerCase();
     return candidates.filter((candidate) => {
       const name = (candidate.name || '').toLowerCase();
@@ -100,8 +92,8 @@ const CandidatesPage = () => {
     });
   }, [assignmentFilter, candidates, searchTerm, stageFilter]);
 
-  const hasActiveFilters =
-    Boolean(searchTerm.trim()) || stageFilter !== 'all' || assignmentFilter !== 'all';
+  const hasActiveFilters = Boolean(searchTerm.trim()) || stageFilter !== 'all' || assignmentFilter !== 'all';
+  const sidebarLinks = useMemo(() => getSidebarLinks(userRole), [userRole]);
 
   const resetFilters = useCallback(() => {
     setSearchTerm('');
@@ -109,15 +101,9 @@ const CandidatesPage = () => {
     setAssignmentFilter('all');
   }, []);
 
-const CandidatesPage = () => {
-  const sidebarLinks = useMemo(() => getSidebarLinks(userRole), [userRole]);
-
   const handleLogout = async () => {
     try {
-      await fetch(`${API_URL}/api/v1/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      await fetch(`${API_URL}/api/v1/auth/logout`, { method: 'POST', credentials: 'include' });
       toast.success('Logged out successfully');
     } catch (logoutError) {
       console.warn('Failed to log out cleanly', logoutError);
@@ -165,7 +151,7 @@ const CandidatesPage = () => {
             data={{
               stage: stageFilter === 'all' ? undefined : stageFilter,
               dateFrom: undefined,
-              dateTo: undefined
+              dateTo: undefined,
             }}
             filename="candidates-report"
             variant="outline"
@@ -196,6 +182,7 @@ const CandidatesPage = () => {
             />
           </div>
         </div>
+
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <div className="space-y-2">
             <Label
@@ -218,6 +205,7 @@ const CandidatesPage = () => {
               ))}
             </select>
           </div>
+
           <div className="space-y-2">
             <Label
               htmlFor="candidate-assignment-filter"
@@ -236,6 +224,7 @@ const CandidatesPage = () => {
               <option value="unassigned">Unassigned</option>
             </select>
           </div>
+
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase text-muted-foreground tracking-wide">
               Active filters
@@ -243,9 +232,9 @@ const CandidatesPage = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {hasActiveFilters ? null : <span className="text-muted-foreground">None</span>}
               {stageFilter !== 'all' ? (
-              <Badge variant="outline" className="text-xs">
-              Stage: {stageFilter === 'all' ? 'All' : stageLabel(stageFilter)}
-              </Badge>
+                <Badge variant="outline" className="text-xs">
+                  Stage: {stageLabel(stageFilter)}
+                </Badge>
               ) : null}
               {assignmentFilter !== 'all' ? (
                 <Badge variant="outline" className="text-xs">
@@ -255,6 +244,7 @@ const CandidatesPage = () => {
             </div>
           </div>
         </div>
+
         {hasActiveFilters ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card/60 px-3 py-2 text-xs text-muted-foreground">
             <span>
@@ -285,13 +275,19 @@ const CandidatesPage = () => {
         ) : filteredCandidates.length === 0 ? (
           <EmptyState
             icon={Users}
-            title={hasActiveFilters ? "No candidates matched your filters" : "No candidates yet"}
-            description={hasActiveFilters ? "Try adjusting your search or filters" : "Start by adding your first candidate to your pipeline"}
-            action={hasActiveFilters ? (
-              <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
-                Reset filters
-              </Button>
-            ) : null}
+            title={hasActiveFilters ? 'No candidates matched your filters' : 'No candidates yet'}
+            description={
+              hasActiveFilters
+                ? 'Try adjusting your search or filters'
+                : 'Start by adding your first candidate to your pipeline'
+            }
+            action={
+              hasActiveFilters ? (
+                <Button type="button" variant="outline" size="sm" onClick={resetFilters}>
+                  Reset filters
+                </Button>
+              ) : null
+            }
           />
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border bg-card/70">
@@ -326,10 +322,10 @@ const CandidatesPage = () => {
                   </div>
                   <div className="flex items-center gap-3 sm:gap-6">
                     <Badge className={badgeTone}>{stageLabelText}</Badge>
-                      <div className="text-xs sm:text-sm text-muted-foreground">
-                        <span className="font-semibold text-foreground">
-                          {candidate.daily_applications || 0}
-                        </span>{' '}
+                    <div className="text-xs sm:text-sm text-muted-foreground">
+                      <span className="font-semibold text-foreground">
+                        {candidate.daily_applications || 0}
+                      </span>{' '}
                       today &middot;{' '}
                       <span className="font-semibold text-emerald-600">
                         {candidate.approved_applications || 0}
@@ -340,21 +336,16 @@ const CandidatesPage = () => {
                       </span>{' '}
                       pending
                     </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>
-                );
-              })}
-            </div>
-          )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </DashboardLayout>
   );
 };
 
 export default CandidatesPage;
-
-
-
-
-

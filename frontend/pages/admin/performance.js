@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import PDFExportButton from '../../components/ui/pdf-export-button';
 import PDFExportPanel from '../../components/ui/pdf-export-panel';
-import { DashboardLayout } from '../../components/Layout/DashboardLayout';
+import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
 import { getSidebarLinks } from '../../lib/sidebarLinks';
 
@@ -271,6 +271,5 @@ const PerformancePage = () => {
 };
 
 export default PerformancePage;
-
 
 
