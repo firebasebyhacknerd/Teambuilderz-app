@@ -1,6 +1,5 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import {
   UserCheck,
@@ -22,7 +21,6 @@ import {
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
-import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
@@ -81,10 +79,10 @@ const attendanceStatusTone = {
 };
 
 const attendanceStatusOptions = [
-  { value: 'present', label: 'Present', desc: 'Full day', icon: CheckCircle2, tone: 'text-emerald-700' },
-  { value: 'half-day', label: 'Half Day', desc: 'Partial', icon: Sunrise, tone: 'text-amber-700' },
-  { value: 'leave', label: 'Leave', desc: 'Planned', icon: Plane, tone: 'text-blue-700' },
-  { value: 'absent', label: 'Absent', desc: 'Unplanned', icon: Ban, tone: 'text-rose-700' },
+  { value: 'present', label: 'Present', desc: 'Full day', icon: CheckCircle2, tone: 'text-emerald-700', locked: true },
+  { value: 'half-day', label: 'Half Day', desc: 'Partial', icon: Sunrise, tone: 'text-amber-700', locked: true },
+  { value: 'leave', label: 'Leave', desc: 'Planned', icon: Plane, tone: 'text-blue-700', locked: false },
+  { value: 'absent', label: 'Absent', desc: 'Unplanned', icon: Ban, tone: 'text-rose-700', locked: true },
 ];
 
 const leaveCategoryOptions = [
@@ -100,6 +98,8 @@ const HALF_DAY_REASON_LABELS = {
   'reported-half-day': 'Half-day reported',
 };
 
+const STATUS_LOCK_MESSAGE = 'Shift attendance is recorded by admins. Use this form only to request leave.';
+
 const RecruiterDashboard = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
@@ -109,7 +109,7 @@ const RecruiterDashboard = () => {
   const [weeklyAvg, setWeeklyAvg] = useState(0);
   const [monthlyAvg, setMonthlyAvg] = useState(0);
   const [userName, setUserName] = useState('Recruiter');
-  const [attendanceStatus, setAttendanceStatus] = useState('present');
+  const [attendanceStatus, setAttendanceStatus] = useState('leave');
   const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
   const monthStartIso = useMemo(() => {
     const today = new Date();
@@ -117,9 +117,6 @@ const RecruiterDashboard = () => {
     return start.toISOString().split('T')[0];
   }, []);
   const [attendanceMessage, setAttendanceMessage] = useState(null);
-  const [checkInTime, setCheckInTime] = useState('');
-  const [checkOutTime, setCheckOutTime] = useState('');
-  const [breakMinutes, setBreakMinutes] = useState('45');
   const [informedLeave, setInformedLeave] = useState(false);
   const [leaveCategory, setLeaveCategory] = useState('');
 
@@ -279,23 +276,13 @@ const RecruiterDashboard = () => {
   }, [attendanceData, todayIso]);
 
   useEffect(() => {
-    if (!todayAttendance) {
-      setCheckInTime('');
-      setCheckOutTime('');
-      setBreakMinutes('45');
-      setInformedLeave(false);
+    if (!todayAttendance || todayAttendance.reportedStatus !== 'leave') {
       setLeaveCategory('');
+      setInformedLeave(false);
       return;
     }
-    setCheckInTime(todayAttendance.checkInTime || '');
-    setCheckOutTime(todayAttendance.checkOutTime || '');
-    setBreakMinutes(
-      todayAttendance.breakMinutes === null || todayAttendance.breakMinutes === undefined
-        ? '45'
-        : String(todayAttendance.breakMinutes),
-    );
-    setInformedLeave(Boolean(todayAttendance.informedLeave));
     setLeaveCategory(todayAttendance.leaveCategory || '');
+    setInformedLeave(Boolean(todayAttendance.informedLeave));
   }, [todayAttendance]);
 
   const attendanceEffective = todayAttendance?.effectiveStatus ?? 'unmarked';
@@ -373,28 +360,23 @@ const RecruiterDashboard = () => {
     }
     return 'Attendance requires attention.';
   }, [todayAttendance, policyImpact]);
-  const requiresShiftTimes = attendanceStatus === 'present' || attendanceStatus === 'half-day';
   const requiresLeaveType = attendanceStatus === 'leave';
-  const leaveRequiresNotice = attendanceStatus === 'leave' || attendanceStatus === 'absent';
-  const timingInputsIncomplete = requiresShiftTimes && (!checkInTime || !checkOutTime);
+  const leaveRequiresNotice = attendanceStatus === 'leave';
+  const statusLocked = attendanceStatus !== 'leave';
   const missingLeaveType = requiresLeaveType && !leaveCategory;
-  const submitAttendanceDisabled =
-    submitAttendance.isPending || isApprovedFullPresent || timingInputsIncomplete || missingLeaveType;
+  const submitAttendanceDisabled = submitAttendance.isPending || statusLocked || missingLeaveType;
 
   const handleAttendanceSubmit = () => {
+    if (attendanceStatus !== 'leave') {
+      toast.error('Only leave requests can be submitted. Contact your admin for attendance updates.');
+      return;
+    }
     setAttendanceMessage(null);
     const payload = {
       attendance_date: todayIso,
-      status: attendanceStatus,
+      status: 'leave',
     };
-    if (requiresShiftTimes) {
-      payload.check_in_time = checkInTime;
-      payload.check_out_time = checkOutTime;
-      payload.break_minutes = Math.max(0, parseInt(breakMinutes || '0', 10));
-    }
-    if (requiresLeaveType) {
-      payload.leave_category = leaveCategory;
-    }
+    payload.leave_category = leaveCategory;
     if (leaveRequiresNotice) {
       payload.informed_leave = informedLeave;
     }
@@ -407,7 +389,7 @@ const RecruiterDashboard = () => {
             text: `Submitted ${humanize(attendanceStatus)} for admin approval.`,
           });
           toast.success(`Submitted ${humanize(attendanceStatus)}`);
-          setAttendanceStatus('present');
+          setAttendanceStatus('leave');
           emitRefresh(REFRESH_CHANNELS.ATTENDANCE);
           emitRefresh(REFRESH_CHANNELS.DASHBOARD);
         },
@@ -634,17 +616,21 @@ const RecruiterDashboard = () => {
               {attendanceStatusOptions.map((option) => {
                 const Icon = option.icon;
                 const isActive = attendanceStatus === option.value;
+                const isLocked = option.locked;
+                const buttonClasses = [
+                  'group relative overflow-hidden rounded-lg border text-left transition-all duration-200',
+                  isActive ? 'border-primary/60 bg-primary/10 shadow-sm shadow-primary/10 scale-[1.01]' : 'border-border',
+                  isLocked ? 'opacity-60 cursor-not-allowed' : 'hover:border-primary/30 hover:bg-primary/5',
+                ].join(' ');
+                const handleClick = () => {
+                  if (isLocked) {
+                    toast(STATUS_LOCK_MESSAGE);
+                    return;
+                  }
+                  setAttendanceStatus(option.value);
+                };
                 return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setAttendanceStatus(option.value)}
-                    className={`group relative overflow-hidden rounded-lg border text-left transition-all duration-200 ${
-                      isActive
-                        ? 'border-primary/60 bg-primary/10 shadow-sm shadow-primary/10 scale-[1.01]'
-                        : 'border-border hover:border-primary/30 hover:bg-primary/5'
-                    }`}
-                  >
+                  <button key={option.value} type="button" onClick={handleClick} className={buttonClasses} disabled={isLocked}>
                     <div className="flex items-center gap-2 px-3 py-2">
                       <span
                         className={`rounded-full bg-white/80 p-1 ring-1 ring-black/5 transition-transform duration-200 group-hover:scale-105 ${option.tone}`}
@@ -653,7 +639,9 @@ const RecruiterDashboard = () => {
                       </span>
                       <div className="flex flex-col">
                         <span className="text-xs font-semibold text-foreground">{option.label}</span>
-                        <span className="text-[11px] text-muted-foreground">{option.desc}</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {isLocked ? 'Recorded by admin' : option.desc}
+                        </span>
                       </div>
                     </div>
                     {isActive ? (
@@ -664,45 +652,9 @@ const RecruiterDashboard = () => {
               })}
             </div>
           </div>
-          {requiresShiftTimes ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="attendance-check-in" className="text-xs text-muted-foreground font-medium">
-                  Check-in (IST)
-                </Label>
-                <Input
-                  id="attendance-check-in"
-                  type="time"
-                  value={checkInTime}
-                  onChange={(event) => setCheckInTime(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="attendance-check-out" className="text-xs text-muted-foreground font-medium">
-                  Check-out (IST)
-                </Label>
-                <Input
-                  id="attendance-check-out"
-                  type="time"
-                  value={checkOutTime}
-                  onChange={(event) => setCheckOutTime(event.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="attendance-break" className="text-xs text-muted-foreground font-medium">
-                  Break minutes (max 45)
-                </Label>
-                <Input
-                  id="attendance-break"
-                  type="number"
-                  min={0}
-                  max={240}
-                  value={breakMinutes}
-                  onChange={(event) => setBreakMinutes(event.target.value)}
-                />
-              </div>
-            </div>
-          ) : null}
+          <p className="text-[11px] text-muted-foreground">
+            {STATUS_LOCK_MESSAGE}
+          </p>
           {leaveRequiresNotice ? (
             <div className="space-y-3 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 p-3">
               {requiresLeaveType ? (
@@ -1140,6 +1092,7 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
+
 
 
 

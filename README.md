@@ -1,4 +1,4 @@
-# TeamBuilderz Admin Portal
+﻿# TeamBuilderz Admin Portal
 
 TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a web application built with Next.js for the frontend and an Express.js API for the backend, using PostgreSQL as the database.
 
@@ -123,6 +123,43 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
 
 ---
 
+## Data Export (CSV/PDF)
+
+Attendance filters now double as export filters. Download your selection either through the Admin UI (Attendance -> "Download CSV/PDF") or directly via the API:
+
+- `GET /api/v1/attendance?date_from=2025-01-01&date_to=2025-01-31&format=csv`
+- `GET /api/v1/attendance?date_from=2025-01-01&date_to=2025-01-31&format=pdf`
+
+Use the standard `Authorization: Bearer <token>` header. Recruiters can only export their own records, while admins inherit whatever `user_id`, `pending_only`, and date filters they supply. CSV output emits one row per user/day (with policy metadata such as half-day reasons), and the PDF stream includes a summary plus a table suitable for payroll or compliance reviews.
+
+### Bulk Attendance Import (CSV)
+
+Admins can upload CSV files instead of entering records manually:
+
+1. Create a UTF-8 CSV with headers (order is flexible):
+   ```
+   user_email,attendance_date,status,approval_status,check_in_time,check_out_time,break_minutes,leave_category,informed_leave,reviewer_note
+   recruiter1@example.com,2025-01-03,present,approved,19:00,04:00,45,,true,Manual entry from kiosk
+   recruiter2@example.com,2025-01-04,leave,approved,,,,"sl",true,Sick leave certificate on file
+   ```
+   - `user_email` or `user_id` must be provided for each row.
+   - `attendance_date` uses `YYYY-MM-DD`.
+   - `status` ∈ `{present, half-day, absent, leave}`.
+   - `approval_status` defaults to `approved`.
+   - `leave_category` (when `status=leave`) ∈ `{cl, sl, emergency, lwp}`.
+   - Times are in 24-hour `HH:MM`.
+   - `informed_leave` accepts yes/no/true/false.
+2. In **Admin → Attendance**, click **Dry-Run Import** to validate, then **Import CSV** to persist. You may also call the API directly:
+   ```
+   POST /api/v1/attendance/import
+   Authorization: Bearer <token>
+   Content-Type: multipart/form-data
+   (form field "file" = CSV, optional "dry_run"=true)
+   ```
+
+Dry-runs report row-level validation errors without committing any data.
+
+---
 ## Detailed Installation Guide
 
 ### 1. Prerequisites
@@ -345,3 +382,5 @@ If you encounter setup issues:
 - Reach out to the TeamBuilderz engineering channel with log excerpts and steps taken.
 
 Happy building! 🚀
+
+

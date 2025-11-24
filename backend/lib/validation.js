@@ -237,23 +237,6 @@ module.exports = {
       })
       .superRefine((data, ctx) => {
         const status = data.status || 'present';
-        const requiresTiming = status === 'present' || status === 'half-day';
-        if (requiresTiming) {
-          if (!data.check_in_time) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: ['check_in_time'],
-              message: 'Check-in time is required for present/half-day entries.',
-            });
-          }
-          if (!data.check_out_time) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              path: ['check_out_time'],
-              message: 'Check-out time is required for present/half-day entries.',
-            });
-          }
-        }
         if (status === 'leave' && !data.leave_category) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,

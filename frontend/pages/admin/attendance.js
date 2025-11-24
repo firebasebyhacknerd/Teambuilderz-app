@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { CheckCircle2, XCircle, Clock, CalendarCheck, Loader2, Sunrise } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
@@ -8,6 +8,14 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import {
   useAttendanceQuery,
   useSubmitAttendanceMutation,
   useUpdateAttendanceMutation,
@@ -15,6 +23,7 @@ import {
 } from '../../lib/queryHooks';
 import { emitRefresh, REFRESH_CHANNELS } from '../../lib/refreshBus';
 import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import API_URL from '../../lib/api';
 
 const formatDateIso = (date) => {
   const source = date instanceof Date ? date : new Date(date);
@@ -117,7 +126,42 @@ const AdminAttendancePage = () => {
   const [pendingOnly, setPendingOnly] = useState(false);
   const [actionMessage, setActionMessage] = useState(null);
   const [pendingUpdateId, setPendingUpdateId] = useState(null);
+  const [downloadState, setDownloadState] = useState(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [pendingImportMode, setPendingImportMode] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
+  const importColumns =
+    'user_email, attendance_date, status, approval_status, check_in_time, check_out_time, break_minutes, leave_category, informed_leave, reviewer_note';
+  const [importHistory, setImportHistory] = useState([]);
+  const [summaryModalOpen, setSummaryModalOpen] = useState(false);
+  const [activeSummary, setActiveSummary] = useState(null);
+  const [previewData, setPreviewData] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
   const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
+  const templateCsv = useMemo(
+    () =>
+      [
+        ['user_email', 'attendance_date', 'status', 'approval_status', 'check_in_time', 'check_out_time', 'break_minutes', 'leave_category', 'informed_leave', 'reviewer_note'].join(','),
+        'recruiter@example.com,2025-01-03,present,approved,19:00,04:00,45,,true,Manual entry',
+        'recruiter2@example.com,2025-01-04,leave,approved,,,,sl,true,Sick leave certificate',
+      ].join('\n'),
+    [],
+  );
+  const templateHref = useMemo(
+    () => `data:text/csv;charset=utf-8,${encodeURIComponent(templateCsv)}`,
+    [templateCsv],
+  );
+  const formatTimestamp = useCallback((value) => {
+    if (!value) {
+      return '';
+    }
+    try {
+      return new Date(value).toLocaleString();
+    } catch (error) {
+      return value;
+    }
+  }, []);
 
   useEffect(() => {
     const storedToken = localStorage.getItem('token');
@@ -157,6 +201,206 @@ const AdminAttendancePage = () => {
     data: attendanceData,
     isFetching: attendanceLoading,
   } = useAttendanceQuery(token, attendanceParams, Boolean(token));
+
+  const parsePreviewFile = useCallback(
+    (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Unable to read file.'));
+        reader.onload = () => {
+          try {
+            const text = reader.result ? reader.result.toString() : '';
+            const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+            if (lines.length === 0) {
+              resolve({ columns: [], rows: [] });
+              return;
+            }
+            const headers = lines[0]
+              .split(',')
+              .map((header) => header.trim())
+              .filter((header) => header.length > 0);
+            const rows = [];
+            for (let i = 1; i < lines.length && rows.length < 5; i += 1) {
+              const cells = lines[i].split(',').map((cell) => cell.trim());
+              if (cells.length === 1 && cells[0] === '') {
+                continue;
+              }
+              const row = {};
+              headers.forEach((header, idx) => {
+                row[header] = cells[idx] ?? '';
+              });
+              rows.push(row);
+            }
+            resolve({ columns: headers, rows });
+          } catch (error) {
+            reject(new Error('Unable to parse CSV preview.'));
+          }
+        };
+        reader.readAsText(file.slice(0, 20000));
+      }),
+    [],
+  );
+
+  const handleReportDownload = useCallback(
+    async (format) => {
+      if (!token) {
+        return;
+      }
+      setActionMessage(null);
+      setDownloadState(format);
+      try {
+        const params = new URLSearchParams();
+        params.append('date_from', dateFrom);
+        params.append('date_to', dateTo);
+        if (selectedRecruiter && selectedRecruiter !== 'all') {
+          params.append('user_id', selectedRecruiter);
+        }
+        if (pendingOnly) {
+          params.append('pending_only', 'true');
+        }
+        params.append('format', format);
+        const response = await fetch(`${API_URL}/api/v1/attendance?${params.toString()}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          let message = 'Unable to download report.';
+          try {
+            const payload = text ? JSON.parse(text) : null;
+            message = payload?.message || message;
+          } catch (error) {
+            // ignore parse errors
+          }
+          throw new Error(message);
+        }
+        const blob = await response.blob();
+        const extension = format === 'pdf' ? 'pdf' : 'csv';
+        const filename = `attendance-${dateFrom}-${dateTo}.${extension}`;
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(blobUrl);
+      } catch (error) {
+        setActionMessage({ type: 'error', text: error.message || 'Unable to download report.' });
+      } finally {
+        setDownloadState(null);
+      }
+    },
+    [token, dateFrom, dateTo, selectedRecruiter, pendingOnly],
+  );
+
+  const handleImportSubmit = useCallback(
+    async (file, isDryRun) => {
+      if (!token || !file) {
+        return;
+      }
+      setImportLoading(true);
+      setActionMessage(null);
+      setImportResult(null);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (isDryRun) {
+          formData.append('dry_run', 'true');
+        }
+        const response = await fetch(`${API_URL}/api/v1/attendance/import`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload?.message || 'Unable to import attendance.');
+        }
+        setImportResult(payload);
+        const summaryEntry = {
+          ...payload,
+          dryRun: isDryRun,
+          timestamp: new Date().toISOString(),
+        };
+        setImportHistory((prev) => [summaryEntry, ...prev].slice(0, 5));
+        setActiveSummary(summaryEntry);
+        setSummaryModalOpen(true);
+        setActionMessage({
+          type: 'success',
+          text: isDryRun
+            ? `Dry-run completed (${payload.imported}/${payload.processed} rows valid).`
+            : `Imported ${payload.imported} of ${payload.processed} rows.`,
+        });
+        if (!isDryRun) {
+          emitRefresh(REFRESH_CHANNELS.ATTENDANCE);
+        }
+      } catch (error) {
+        setActionMessage({ type: 'error', text: error.message || 'Unable to import attendance.' });
+      } finally {
+        setImportLoading(false);
+        setPendingImportMode(null);
+      }
+    },
+    [token],
+  );
+
+  const handleImportFileChange = useCallback(
+    async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (!file || !pendingImportMode) {
+        setPendingImportMode(null);
+        return;
+      }
+       try {
+         const preview = await parsePreviewFile(file);
+         setPreviewData({ ...preview, filename: file.name });
+         setPreviewError(null);
+       } catch (error) {
+         setPreviewData(null);
+         setPreviewError(error.message || 'Unable to preview CSV file.');
+       }
+      const isDryRun = pendingImportMode === 'dry-run';
+      handleImportSubmit(file, isDryRun);
+    },
+    [handleImportSubmit, parsePreviewFile, pendingImportMode],
+  );
+
+  const handleImportRequest = useCallback(
+    (mode) => {
+      if (!token) {
+        return;
+      }
+      setImportResult(null);
+      setPendingImportMode(mode);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+        fileInputRef.current.click();
+      }
+    },
+    [token],
+  );
+
+  const handleClearPreview = useCallback(() => {
+    setPreviewData(null);
+    setPreviewError(null);
+  }, []);
+
+  const handleHistoryView = useCallback((entry) => {
+    setActiveSummary(entry);
+    setSummaryModalOpen(true);
+  }, []);
+
+  const handleSummaryModalChange = useCallback((open) => {
+    setSummaryModalOpen(open);
+    if (!open) {
+      setActiveSummary(null);
+    }
+  }, []);
 
   const submitAttendance = useSubmitAttendanceMutation(token, {
     onSuccess: () => {
@@ -264,6 +508,7 @@ const AdminAttendancePage = () => {
 
   const isSubmitting = submitAttendance.isPending;
   const isUpdating = updateAttendance.isPending;
+  const isDownloading = Boolean(downloadState);
 
   return (
     <DashboardLayout
@@ -273,6 +518,13 @@ const AdminAttendancePage = () => {
       actions={null}
       onBack={null}
     >
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={handleImportFileChange}
+      />
       <div className="space-y-6">
         <Card className="p-0 overflow-hidden">
                     <div className="px-6 py-4 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -299,6 +551,131 @@ const AdminAttendancePage = () => {
                 {actionMessage.text}
               </div>
             ) : null}
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <Badge variant="outline">Range {dateFrom}→{dateTo}</Badge>
+              {selectedRecruiter && selectedRecruiter !== 'all' ? (
+                <Badge variant="outline">Recruiter #{selectedRecruiter}</Badge>
+              ) : (
+                <Badge variant="outline">All recruiters</Badge>
+              )}
+              <Badge variant={pendingOnly ? 'default' : 'outline'}>
+                {pendingOnly ? 'Pending only' : 'All approvals'}
+              </Badge>
+            </div>
+            {importResult ? (
+              <div className="rounded-lg border border-dashed px-4 py-3 text-xs bg-muted/30 space-y-2">
+                <div className="flex items-center justify-between text-sm font-medium text-foreground">
+                  <span>{importResult.dryRun ? 'Dry-run summary' : 'Import summary'}</span>
+                  <span>
+                    {importResult.imported} / {importResult.processed} rows
+                  </span>
+                </div>
+                {importResult.errors?.length ? (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-rose-700">Errors (showing first 5)</p>
+                    <ul className="list-disc space-y-1 pl-4 text-rose-700">
+                      {importResult.errors.slice(0, 5).map((error, idx) => (
+                        <li key={`${error.row}-${idx}`}>
+                          Row {error.row}: {error.errors.join('; ')}
+                        </li>
+                      ))}
+                    </ul>
+                    {importResult.errors.length > 5 ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        {importResult.errors.length - 5} additional errors hidden.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-emerald-700">No validation errors.</p>
+                )}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleReportDownload('csv')}
+                disabled={isDownloading || importLoading}
+              >
+                {downloadState === 'csv' ? 'Preparing CSV…' : 'Download CSV'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleReportDownload('pdf')}
+                disabled={isDownloading || importLoading}
+              >
+                {downloadState === 'pdf' ? 'Preparing PDF…' : 'Download PDF'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleImportRequest('dry-run')}
+                disabled={importLoading}
+              >
+                {importLoading && pendingImportMode === 'dry-run' ? 'Uploading…' : 'Dry-Run Import'}
+              </Button>
+              <Button size="sm" onClick={() => handleImportRequest('import')} disabled={importLoading}>
+                {importLoading && pendingImportMode === 'import' ? 'Importing…' : 'Import CSV'}
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <a href={templateHref} download="attendance-template.csv">
+                  Template CSV
+                </a>
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              CSV headers: {importColumns}
+            </p>
+            {previewError ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800">
+                {previewError}
+              </div>
+            ) : null}
+            {previewData && (previewData.columns.length > 0 || previewData.rows.length > 0) ? (
+              <div className="rounded-lg border border-dashed border-muted-foreground/40 bg-muted/20 p-4 space-y-2">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <div>
+                    Previewing <span className="font-semibold">{previewData.filename}</span>
+                  </div>
+                  <Button variant="ghost" size="xs" onClick={handleClearPreview}>
+                    Clear preview
+                  </Button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-xs border border-border rounded-md">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        {previewData.columns.map((column) => (
+                          <th key={column} className="px-2 py-1 text-left font-semibold">
+                            {column}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewData.rows.map((row, idx) => (
+                        <tr key={`${previewData.filename}-${idx}`} className="border-t border-border/60">
+                          {previewData.columns.map((column) => (
+                            <td key={`${column}-${idx}`} className="px-2 py-1">
+                              {row[column] ?? ''}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {previewData.rows.length === 0 ? (
+                        <tr>
+                          <td colSpan={previewData.columns.length || 1} className="px-2 py-2 text-center text-muted-foreground">
+                            No sample rows detected.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {[
                 { key: 'today', label: 'Today' },
@@ -321,6 +698,31 @@ const AdminAttendancePage = () => {
                 </Button>
               ))}
             </div>
+            {importHistory.length ? (
+              <div className="rounded-lg border border-muted/40 bg-card p-3 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-foreground">
+                  <span>Recent Imports</span>
+                  <span>{importHistory.length}</span>
+                </div>
+                <div className="space-y-2">
+                  {importHistory.map((entry, idx) => (
+                    <div key={`${entry.timestamp}-${idx}`} className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-xs">
+                      <div className="space-y-1">
+                        <div className="font-semibold text-foreground">
+                          {entry.dryRun ? 'Dry-run' : 'Imported'} · {formatTimestamp(entry.timestamp)}
+                        </div>
+                        <div className="text-muted-foreground">
+                          {entry.imported}/{entry.processed} rows · {entry.errors?.length ?? 0} errors
+                        </div>
+                      </div>
+                      <Button size="xs" variant="outline" onClick={() => handleHistoryView(entry)}>
+                        View
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="attendance-from">From</Label>
@@ -859,6 +1261,65 @@ const AdminAttendancePage = () => {
           </Card>
         ) : null}
       </div>
+      <Dialog open={Boolean(activeSummary) && summaryModalOpen} onOpenChange={handleSummaryModalChange}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{activeSummary?.dryRun ? 'Dry-run summary' : 'Import summary'}</DialogTitle>
+            <DialogDescription>
+              {activeSummary
+                ? `Processed ${activeSummary.processed} rows on ${formatTimestamp(activeSummary.timestamp)}.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          {activeSummary ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border border-border/60 p-3">
+                  <p className="text-muted-foreground">Processed</p>
+                  <p className="text-lg font-semibold">{activeSummary.processed}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3">
+                  <p className="text-muted-foreground">Imported</p>
+                  <p className="text-lg font-semibold">{activeSummary.imported}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3">
+                  <p className="text-muted-foreground">Errors</p>
+                  <p className="text-lg font-semibold">{activeSummary.errors?.length ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-border/60 p-3">
+                  <p className="text-muted-foreground">Mode</p>
+                  <p className="text-lg font-semibold">{activeSummary.dryRun ? 'Dry-run' : 'Import'}</p>
+                </div>
+              </div>
+              {activeSummary.errors?.length ? (
+                <div className="max-h-60 overflow-y-auto rounded-lg border border-border/60">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Row</th>
+                        <th className="px-2 py-1 text-left">Errors</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeSummary.errors.map((error, idx) => (
+                        <tr key={`${error.row}-${idx}`} className="border-t border-border/60">
+                          <td className="px-2 py-1 font-semibold">{error.row}</td>
+                          <td className="px-2 py-1">{error.errors.join('; ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-sm text-emerald-700">No errors recorded.</p>
+              )}
+            </div>
+          ) : null}
+          <DialogFooter className="mt-4">
+            <Button onClick={() => handleSummaryModalChange(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };
@@ -875,6 +1336,10 @@ const SummaryStat = ({ icon, label, value, accent, meta = null }) => (
 );
 
 export default AdminAttendancePage;
+
+
+
+
 
 
 

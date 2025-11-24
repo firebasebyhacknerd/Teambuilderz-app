@@ -11,6 +11,9 @@ const config = require('./lib/config');
 const { validateBody, schemas } = require('./lib/validation');
 const { startAuditStream } = require('./lib/auditStream');
 const { fetchUserProfile } = require('./services/profileService');
+const PDFDocument = require('pdfkit');
+const multer = require('multer');
+const { parse: parseCsv } = require('csv-parse/sync');
 
 const NODE_ENV = (process.env.NODE_ENV || '').toLowerCase();
 const isTestEnv = NODE_ENV === 'test';
@@ -25,6 +28,12 @@ const isProduction = NODE_ENV === 'production';
 const useSecureCookies = config.getBool('COOKIE_SECURE', isProduction);
 const sameSitePolicy = config.get('COOKIE_SAMESITE', 'strict');
 const defaultSkipDbSetup = config.getBool('SKIP_DB_SETUP', isTestEnv);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 2 * 1024 * 1024,
+  },
+});
 
 function createLimiter({ windowMs, max, message, name }) {
   const limiterName = name || 'rate-limit';
@@ -4654,6 +4663,215 @@ const buildPolicyImpact = ({ reportedStatus, checkInTime, checkOutTime, breakMin
   return impact;
 };
 
+const toTitleCase = (value) => {
+  if (!value) {
+    return '';
+  }
+  return String(value)
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+};
+
+const csvEscape = (value) => {
+  if (value === undefined || value === null) {
+    return '""';
+  }
+  const text = String(value).replace(/"/g, '""');
+  return `"${text}"`;
+};
+
+const buildExportFilename = (prefix, range, extension) => {
+  const raw = `${prefix}-${range.dateFrom}-${range.dateTo}.${extension}`;
+  return raw.replace(/[^a-zA-Z0-9.-]/g, '-');
+};
+
+const buildAttendanceCsv = ({ days }) => {
+  const headers = [
+    'Date',
+    'User',
+    'Reported Status',
+    'Effective Status',
+    'Approval Status',
+    'Source',
+    'Check In',
+    'Check Out',
+    'Break Minutes',
+    'Leave Type',
+    'Informed Leave',
+    'Sandwich Applied',
+  ];
+  const rows = [headers.map(csvEscape).join(',')];
+  days.forEach((day) => {
+    rows.push(
+      [
+        day.date,
+        day.userName,
+        toTitleCase(day.reportedStatus),
+        toTitleCase(day.effectiveStatus),
+        toTitleCase(day.approvalStatus || ''),
+        day.source,
+        day.checkInTime || '',
+        day.checkOutTime || '',
+        day.breakMinutes ?? '',
+        day.leaveCategory || '',
+        day.informedLeave ? 'Yes' : 'No',
+        day.sandwichApplied ? 'Yes' : 'No',
+      ]
+        .map(csvEscape)
+        .join(','),
+    );
+  });
+  return rows.join('\n');
+};
+
+const sendAttendanceCsv = (res, payload) => {
+  const csvContent = buildAttendanceCsv(payload);
+  const filename = buildExportFilename('attendance', payload.range, 'csv');
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csvContent);
+};
+
+const streamAttendancePdf = (res, payload) => {
+  const filename = buildExportFilename('attendance', payload.range, 'pdf');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+  const doc = new PDFDocument({ margin: 36, size: 'A4' });
+  doc.pipe(res);
+
+  doc.fontSize(18).text('Attendance Report', { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(11).text(`Date range: ${payload.range.dateFrom} → ${payload.range.dateTo}`);
+  doc.text(`Generated: ${new Date().toISOString()}`);
+  const userList = (payload.users || []).map((user) => user.name).join(', ') || 'No recruiters selected';
+  doc.text(`Recruiters: ${userList}`);
+  doc.moveDown();
+
+  const policy = payload.summary?.policy || {};
+  doc.fontSize(12).text('Summary');
+  doc.fontSize(10).list(
+    [
+      `Present: ${payload.summary.present}`,
+      `Half Days: ${payload.summary.halfDay}`,
+      `Absents: ${payload.summary.absent}`,
+      `Pending: ${payload.summary.pending}`,
+      `Auto Presents: ${payload.summary.autoPresent}`,
+      `Sandwich Absents: ${payload.summary.sandwichAbsent}`,
+      `Half-day Infractions: ${policy.halfDays || 0}`,
+      `Uninformed Leaves: ${policy.uninformedLeaves || 0}`,
+      `Total Deduction Days: ${policy.totalDeductionDays || 0}`,
+    ].filter(Boolean),
+  );
+  doc.moveDown();
+
+  doc.fontSize(12).text('Entries');
+  doc.moveDown(0.5);
+
+  const columns = [
+    { key: 'date', label: 'Date', width: 70 },
+    { key: 'userName', label: 'User', width: 110 },
+    { key: 'reportedStatus', label: 'Reported', width: 65 },
+    { key: 'effectiveStatus', label: 'Effective', width: 65 },
+    { key: 'approvalStatus', label: 'Approval', width: 65 },
+    { key: 'checkInTime', label: 'In', width: 45 },
+    { key: 'checkOutTime', label: 'Out', width: 45 },
+    { key: 'leaveCategory', label: 'Leave', width: 55 },
+  ];
+
+  const drawRow = (row, opts = {}) => {
+    const startY = doc.y;
+    columns.forEach((column) => {
+      const text = row[column.key] ?? '';
+      if (opts.header) {
+        doc.font('Helvetica-Bold');
+      } else {
+        doc.font('Helvetica');
+      }
+      doc.text(String(text), column.x, doc.y, {
+        width: column.width,
+        continued: false,
+      });
+    });
+    doc.moveDown(0.35);
+    return startY;
+  };
+
+  let currentX = doc.x;
+  columns.forEach((column) => {
+    column.x = currentX;
+    currentX += column.width + 6;
+  });
+
+  drawRow(
+    columns.reduce((acc, column) => {
+      acc[column.key] = column.label;
+      return acc;
+    }, {}),
+    { header: true },
+  );
+  doc.moveDown(0.25);
+  doc.moveTo(doc.x, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+  doc.moveDown(0.35);
+
+  const ensureSpace = () => {
+    const remaining = doc.page.height - doc.page.margins.bottom - doc.y;
+    if (remaining < 50) {
+      doc.addPage();
+      currentX = doc.x;
+      columns.forEach((column) => {
+        column.x = currentX;
+        currentX += column.width + 6;
+      });
+      drawRow(
+        columns.reduce((acc, column) => {
+          acc[column.key] = column.label;
+          return acc;
+        }, {}),
+        { header: true },
+      );
+      doc.moveDown(0.25);
+      doc.moveTo(doc.x, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+      doc.moveDown(0.35);
+    }
+  };
+
+  payload.days.forEach((day) => {
+    ensureSpace();
+    drawRow({
+      date: day.date,
+      userName: day.userName,
+      reportedStatus: toTitleCase(day.reportedStatus),
+      effectiveStatus: toTitleCase(day.effectiveStatus),
+      approvalStatus: toTitleCase(day.approvalStatus || ''),
+      checkInTime: day.checkInTime || '',
+      checkOutTime: day.checkOutTime || '',
+      leaveCategory: day.leaveCategory ? day.leaveCategory.toUpperCase() : '',
+    });
+  });
+
+  doc.end();
+};
+
+const parseBooleanish = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (['true', '1', 'yes', 'y'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'no', 'n'].includes(normalized)) {
+    return false;
+  }
+  return null;
+};
+
 const parseAttendanceMeta = (row) => {
   if (!row) {
     return {
@@ -4770,6 +4988,11 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
     const today = parseDateOnly(new Date());
     let dateFrom = parseDateOnly(req.query?.date_from) || new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
     let dateTo = parseDateOnly(req.query?.date_to) || today;
+    const exportFormatRaw = typeof req.query?.format === 'string' ? req.query.format : '';
+    const exportFormat = exportFormatRaw.trim().toLowerCase();
+    const wantsCsv = exportFormat === 'csv';
+    const wantsPdf = exportFormat === 'pdf';
+
     if (!dateFrom || !dateTo) {
       return res.status(400).json({ message: 'Invalid date range provided.' });
     }
@@ -4782,6 +5005,11 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
     if (rangeDays > 120) {
       return res.status(400).json({ message: 'Limit attendance queries to 120 days or fewer.' });
     }
+    const rangeInfo = {
+      dateFrom: toDateIso(dateFrom),
+      dateTo: toDateIso(dateTo),
+      days: rangeDays,
+    };
 
     const rawUserId = req.query?.user_id;
     const normalizedUserId = rawUserId === 'self' ? req.user.userId : rawUserId;
@@ -4830,11 +5058,7 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
 
     if (users.length === 0) {
       return res.json({
-        range: {
-          dateFrom: toDateIso(dateFrom),
-          dateTo: toDateIso(dateTo),
-          days: rangeDays,
-        },
+        range: rangeInfo,
         users: [],
         days: [],
         records: [],
@@ -5045,12 +5269,17 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
       ? allRecords.filter((record) => record.approvalStatus === 'pending')
       : allRecords;
 
+    if (wantsCsv) {
+      sendAttendanceCsv(res, { range: rangeInfo, days, summary, users });
+      return;
+    }
+    if (wantsPdf) {
+      streamAttendancePdf(res, { range: rangeInfo, days, summary, users });
+      return;
+    }
+
     res.json({
-      range: {
-        dateFrom: toDateIso(dateFrom),
-        dateTo: toDateIso(dateTo),
-        days: rangeDays,
-      },
+      range: rangeInfo,
       users,
       days,
       records,
@@ -5101,6 +5330,11 @@ app.post(
       const validStatuses = ['present', 'half-day', 'absent', 'leave'];
       if (!validStatuses.includes(reportedStatus)) {
         return res.status(400).json({ message: 'Unsupported attendance status.' });
+      }
+      if (!isAdmin && reportedStatus !== 'leave') {
+        return res.status(400).json({
+          message: 'Only leave requests may be submitted by recruiters. Admins will record shift attendance.',
+        });
       }
 
       const checkInTime = normalizeShiftTimeInput(req.body.check_in_time);
@@ -5317,6 +5551,219 @@ app.put(
       console.error('Error updating attendance:', error);
       res.status(500).json({ message: 'Internal server error' });
     }
+  },
+);
+
+app.post(
+  '/api/v1/attendance/import',
+  verifyToken,
+  requireRole('Admin'),
+  upload.single('file'),
+  async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Upload a CSV file via the "file" field.' });
+    }
+    let rows;
+    try {
+      rows = parseCsv(req.file.buffer.toString('utf8'), {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      });
+    } catch (error) {
+      return res.status(400).json({ message: 'Unable to parse CSV file. Ensure it has headers and uses UTF-8 encoding.' });
+    }
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ message: 'No data rows found in CSV.' });
+    }
+    const dryRun = String(req.body?.dry_run || '').toLowerCase() === 'true';
+    const allowedStatuses = ['present', 'half-day', 'absent', 'leave'];
+    const allowedApprovalStatuses = ['pending', 'approved', 'rejected'];
+    const allowedLeaveCategories = ['cl', 'sl', 'emergency', 'lwp'];
+    const results = {
+      dryRun,
+      processed: rows.length,
+      imported: 0,
+      errors: [],
+    };
+    const userByEmail = new Map();
+    const userById = new Map();
+
+    const resolveUser = async (input) => {
+      if (!input) {
+        return null;
+      }
+      if (Number.isInteger(input)) {
+        if (userById.has(input)) {
+          return userById.get(input);
+        }
+        const { rows: existing } = await pool.query(
+          `SELECT id, role FROM users WHERE id = $1`,
+          [input],
+        );
+        const user = existing[0] || null;
+        if (user) {
+          userById.set(input, user);
+        }
+        return user;
+      }
+      const email = String(input).trim().toLowerCase();
+      if (!email) {
+        return null;
+      }
+      if (userByEmail.has(email)) {
+        return userByEmail.get(email);
+      }
+      const { rows: existing } = await pool.query(
+        `SELECT id, role FROM users WHERE LOWER(email) = $1`,
+        [email],
+      );
+      const user = existing[0] || null;
+      if (user) {
+        userByEmail.set(email, user);
+      }
+      return user;
+    };
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const csvRow = rows[index];
+      const rowNumber = index + 2;
+      const rowErrors = [];
+      const rawUserId = csvRow.user_id ? Number(csvRow.user_id) : null;
+      const rawEmail = csvRow.user_email ? String(csvRow.user_email) : null;
+      let user = null;
+      if (rawUserId && Number.isInteger(rawUserId)) {
+        user = await resolveUser(rawUserId);
+      } else if (rawEmail) {
+        user = await resolveUser(rawEmail);
+      } else {
+        rowErrors.push('Provide either user_id or user_email.');
+      }
+      if (user && user.role !== 'Recruiter') {
+        rowErrors.push('Attendance import is limited to recruiter accounts.');
+        user = null;
+      }
+      if (!user) {
+        rowErrors.push('User not found.');
+      }
+      const attendanceDate = parseDateOnly(csvRow.attendance_date);
+      if (!attendanceDate) {
+        rowErrors.push('attendance_date must be YYYY-MM-DD.');
+      }
+      const reportedStatus = (csvRow.status || '').trim().toLowerCase() || 'present';
+      if (!allowedStatuses.includes(reportedStatus)) {
+        rowErrors.push(`Unsupported status "${csvRow.status}".`);
+      }
+      const approvalStatus = (csvRow.approval_status || '').trim().toLowerCase() || 'approved';
+      if (!allowedApprovalStatuses.includes(approvalStatus)) {
+        rowErrors.push(`Unsupported approval status "${csvRow.approval_status}".`);
+      }
+      const leaveCategoryRaw = (csvRow.leave_category || '').trim().toLowerCase() || null;
+      if (reportedStatus === 'leave' && !leaveCategoryRaw) {
+        rowErrors.push('leave_category is required when status is leave.');
+      }
+      if (leaveCategoryRaw && !allowedLeaveCategories.includes(leaveCategoryRaw)) {
+        rowErrors.push(`Unsupported leave_category "${csvRow.leave_category}".`);
+      }
+      const checkInTime = normalizeShiftTimeInput(csvRow.check_in_time);
+      const checkOutTime = normalizeShiftTimeInput(csvRow.check_out_time);
+      const breakMinutesRaw = csvRow.break_minutes && csvRow.break_minutes !== ''
+        ? Number(csvRow.break_minutes)
+        : null;
+      if (breakMinutesRaw !== null && (Number.isNaN(breakMinutesRaw) || breakMinutesRaw < 0)) {
+        rowErrors.push('break_minutes must be a positive integer.');
+      }
+      const informedLeave = parseBooleanish(csvRow.informed_leave);
+      const reviewerNote =
+        typeof csvRow.reviewer_note === 'string' && csvRow.reviewer_note.trim()
+          ? csvRow.reviewer_note.trim()
+          : null;
+      if (rowErrors.length > 0) {
+        results.errors.push({ row: rowNumber, errors: rowErrors });
+        continue;
+      }
+      if (dryRun) {
+        results.imported += 1;
+        continue;
+      }
+
+      const attendanceDateIso = toDateIso(attendanceDate);
+      let approvedBy = null;
+      let approvedAt = null;
+      if (approvalStatus === 'approved') {
+        approvedBy = req.user.userId;
+        approvedAt = new Date();
+      }
+      try {
+        await pool.query(
+          `
+            INSERT INTO attendance_entries (
+              user_id,
+              attendance_date,
+              reported_status,
+              approval_status,
+              approved_by,
+              approved_at,
+              reviewer_note,
+              check_in_time,
+              check_out_time,
+              break_minutes,
+              informed_leave,
+              leave_category
+            )
+            VALUES (
+              $1,
+              $2,
+              $3::attendance_status,
+              $4::attendance_approval_status,
+              $5,
+              $6,
+              $7,
+              $8::time,
+              $9::time,
+              $10::integer,
+              $11::boolean,
+              $12
+            )
+            ON CONFLICT (user_id, attendance_date)
+            DO UPDATE SET
+              reported_status = EXCLUDED.reported_status,
+              approval_status = EXCLUDED.approval_status,
+              approved_by = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_by ELSE NULL END,
+              approved_at = CASE WHEN EXCLUDED.approval_status = 'approved' THEN EXCLUDED.approved_at ELSE NULL END,
+              reviewer_note = EXCLUDED.reviewer_note,
+              check_in_time = COALESCE(EXCLUDED.check_in_time, attendance_entries.check_in_time),
+              check_out_time = COALESCE(EXCLUDED.check_out_time, attendance_entries.check_out_time),
+              break_minutes = COALESCE(EXCLUDED.break_minutes, attendance_entries.break_minutes),
+              informed_leave = COALESCE(EXCLUDED.informed_leave, attendance_entries.informed_leave),
+              leave_category = COALESCE(EXCLUDED.leave_category, attendance_entries.leave_category),
+              updated_at = CURRENT_TIMESTAMP
+          `,
+          [
+            user.id,
+            attendanceDateIso,
+            reportedStatus,
+            approvalStatus,
+            approvedBy,
+            approvedAt,
+            reviewerNote,
+            checkInTime,
+            checkOutTime,
+            breakMinutesRaw,
+            informedLeave,
+            leaveCategoryRaw,
+          ],
+        );
+        results.imported += 1;
+      } catch (error) {
+        results.errors.push({
+          row: rowNumber,
+          errors: [`Failed to import row: ${error.message}`],
+        });
+      }
+    }
+
+    return res.json(results);
   },
 );
 
