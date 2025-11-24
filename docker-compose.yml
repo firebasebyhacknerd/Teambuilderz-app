@@ -1,3 +1,4 @@
+
 services:
   tbz_postgres:
     image: postgres:15-alpine
@@ -26,7 +27,7 @@ services:
     ports:
       - "3001:3001"
     environment:
-      DB_HOST: tbz_postgres
+      DB_HOST: host.docker.internal
       DB_PORT: 5432
       DB_USER: teambuilderz_user
       DB_PASSWORD: teambuilderz_password
@@ -35,6 +36,8 @@ services:
       CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000,http://tbz_frontend:3000,http://host.docker.internal:3000,https://localhost
       ENFORCE_TLS: "false"
       SECRETS_FILE: /run/secrets/tbz-backend.json
+      ADMIN_PASSWORD: admin123
+      RECRUITER_PASSWORD: recruit123
     depends_on:
       tbz_postgres:
         condition: service_healthy
