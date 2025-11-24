@@ -23,7 +23,9 @@ module.exports = {
       boxShadow: {
         ios: '0 10px 30px rgba(0, 0, 0, 0.1)',
         'ios-lg': '0 20px 40px rgba(0, 0, 0, 0.15)',
-        'inner-sm': 'inset 0 1px 3px rgba(0, 0, 0, 0.06)'
+        'inner-sm': 'inset 0 1px 3px rgba(0, 0, 0, 0.06)',
+        'brand': 'var(--shadow-brand)',
+        'brand-lg': '0 8px 25px 0 hsl(var(--tbz-blue) / 0.2)'
       },
       colors: {
         border: 'hsl(var(--border))',
@@ -31,17 +33,24 @@ module.exports = {
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        surface: 'hsl(var(--surface))',
+        'surface-hover': 'hsl(var(--surface-hover))',
+        'surface-active': 'hsl(var(--surface-active))',
         primary: {
           DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))'
+          foreground: 'hsl(var(--primary-foreground))',
+          hover: 'hsl(var(--primary-hover))',
+          active: 'hsl(var(--primary-active))'
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))'
+          foreground: 'hsl(var(--secondary-foreground))',
+          hover: 'hsl(var(--secondary-hover))'
         },
         destructive: {
           DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))'
+          foreground: 'hsl(var(--destructive-foreground))',
+          hover: 'hsl(var(--destructive-hover))'
         },
         muted: {
           DEFAULT: 'hsl(var(--muted))',
@@ -49,7 +58,8 @@ module.exports = {
         },
         accent: {
           DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))'
+          foreground: 'hsl(var(--accent-foreground))',
+          hover: 'hsl(var(--accent-hover))'
         },
         popover: {
           DEFAULT: 'hsl(var(--popover))',
@@ -58,6 +68,27 @@ module.exports = {
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))'
+        },
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))'
+        },
+        success: {
+          DEFAULT: 'hsl(var(--success))',
+          foreground: 'hsl(var(--success-foreground))'
+        },
+        info: {
+          DEFAULT: 'hsl(var(--info))',
+          foreground: 'hsl(var(--info-foreground))'
+        },
+        /* TeamBuilderz brand colors */
+        tbz: {
+          blue: 'hsl(var(--tbz-blue))',
+          orange: 'hsl(var(--tbz-orange))',
+          dark: 'hsl(var(--tbz-dark))',
+          'light-gray': 'hsl(var(--tbz-light-gray))',
+          'medium-gray': 'hsl(var(--tbz-medium-gray))',
+          accent: 'hsl(var(--tbz-accent))'
         }
       },
       borderRadius: {

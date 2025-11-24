@@ -602,25 +602,25 @@ const RecruiterDashboard = () => {
       ) : null}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="rounded-xl bg-gradient-to-r from-primary/90 via-primary to-primary/80 text-primary-foreground p-4 sm:p-5 shadow-lg shadow-primary/20">
+        <div className="rounded-xl bg-gradient-to-r from-primary/90 via-primary to-primary/80 text-primary-foreground p-4 sm:p-5 shadow-lg shadow-primary/20 brand-shadow">
           <div className="text-xs uppercase tracking-wide opacity-80">Attendance</div>
           <div className="text-2xl font-semibold mt-1">{humanize(attendanceDisplayStatus)}</div>
           <div className="text-sm opacity-80 mt-1">
             {todayAttendance ? (attendanceApproval === 'auto' ? 'Weekend auto present' : `Admin: ${attendanceApproval}`) : 'Not submitted yet'}
           </div>
         </div>
-        <div className="rounded-xl bg-gradient-to-r from-emerald-500/90 via-emerald-500 to-emerald-600 text-white p-4 sm:p-5 shadow-lg shadow-emerald-500/20">
+        <div className="rounded-xl bg-gradient-to-r from-success/90 via-success to-success/80 text-success-foreground p-4 sm:p-5 shadow-lg shadow-success/20 brand-shadow">
           <div className="text-xs uppercase tracking-wide opacity-90">Today&apos;s Applications</div>
           <div className="text-2xl font-semibold mt-1">{totalAppsToday} / {DAILY_TARGET}</div>
           <div className="text-sm opacity-90 mt-1">{Math.round(progressPercent)}% of daily target</div>
           <p className="mt-2 text-xs text-emerald-100">{nextActionMessage}</p>
         </div>
-        <div className="rounded-xl bg-gradient-to-r from-amber-400/90 via-amber-400 to-amber-500 text-amber-950 p-4 sm:p-5 shadow-lg shadow-amber-400/30">
+        <div className="rounded-xl bg-gradient-to-r from-warning/90 via-warning to-warning/80 text-warning-foreground p-4 sm:p-5 shadow-lg shadow-warning/20 brand-shadow">
           <div className="text-xs uppercase tracking-wide opacity-90">Alerts</div>
           <div className="text-2xl font-semibold mt-1">{notificationsData?.alerts?.length ?? 0}</div>
           <div className="text-sm opacity-90 mt-1 flex items-center gap-2">
             <span>Pending attention</span>
-            <Button size="sm" variant="outline" className="border-amber-700/40 text-amber-900 bg-white/70 hover:bg-white" onClick={handleToastView}>
+            <Button size="sm" variant="outline" className="border-warning/60 text-warning-foreground bg-warning/10 hover:bg-warning/20" onClick={handleToastView}>
               View
             </Button>
           </div>
@@ -632,7 +632,7 @@ const RecruiterDashboard = () => {
                     <div className="flex items-center gap-3">
             <Badge
               variant="outline"
-              className={`capitalize ${attendanceStatusTone[attendanceEffective] ?? 'bg-slate-100 text-slate-700 border border-slate-200'}`}
+              className={`capitalize ${attendanceStatusTone[attendanceEffective] ?? 'bg-surface text-foreground border border-border'}`}
             >
               {humanize(attendanceDisplayStatus)}
             </Badge>
@@ -660,8 +660,8 @@ const RecruiterDashboard = () => {
                 const isLocked = option.locked;
                 const buttonClasses = [
                   'group relative overflow-hidden rounded-lg border text-left transition-all duration-200',
-                  isActive ? 'border-primary/60 bg-primary/10 shadow-sm shadow-primary/10 scale-[1.01]' : 'border-border',
-                  isLocked ? 'opacity-60 cursor-not-allowed' : 'hover:border-primary/30 hover:bg-primary/5',
+                  isActive ? 'border-primary/60 bg-primary/10 shadow-sm shadow-primary/10 scale-[1.01] brand-shadow' : 'border-border',
+                  isLocked ? 'opacity-60 cursor-not-allowed' : 'hover:border-primary/30 hover:bg-primary/5 surface-hover',
                 ].join(' ');
                 const handleClick = () => {
                   if (isLocked) {
@@ -696,7 +696,7 @@ const RecruiterDashboard = () => {
           <p className="text-[11px] text-muted-foreground">
             {STATUS_LOCK_MESSAGE}
           </p>
-          <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+          <div className="rounded-lg border border-border bg-surface/70 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                 <HelpCircle className="h-4 w-4 text-primary" />

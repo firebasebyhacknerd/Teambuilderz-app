@@ -144,20 +144,20 @@ const DashboardLayout = ({
             title={sidebarCollapsed ? label : undefined}
             className={`group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 ${
               isActive
-                ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20"
-                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                ? "bg-primary/10 text-primary shadow-sm ring-1 ring-primary/20 brand-shadow"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground surface-hover"
             }`}
           >
             <span
               className={`absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full transition-all duration-200 ${
-                isActive ? "bg-primary" : "bg-transparent group-hover:bg-primary/40"
+                isActive ? "bg-primary shadow-brand" : "bg-transparent group-hover:bg-primary/40"
               }`}
             />
             <span
               className={`flex h-8 w-8 flex-none items-center justify-center rounded-md border transition-all duration-150 ${
                 isActive
                   ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-card group-hover:border-primary/40 group-hover:text-primary"
+                  : "border-border bg-card group-hover:border-primary/40 group-hover:text-primary surface-hover"
               }`}
             >
               {Icon && <Icon size={18} />}
@@ -188,7 +188,7 @@ const DashboardLayout = ({
         <div className="h-full flex flex-col overflow-y-auto">
           <div className={`px-4 py-5 border-b border-border flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between"} gap-3`}>
             <div className="flex items-center gap-3">
-              <div className="relative h-12 w-12 rounded-xl bg-secondary/60 flex items-center justify-center ring-2 ring-primary/20">
+              <div className="relative h-12 w-12 rounded-xl brand-gradient flex items-center justify-center ring-2 ring-primary/20 shadow-brand">
                 <Image 
                   src="/logo.svg" 
                   alt="TeamBuilderz logo" 

@@ -147,7 +147,7 @@ const LoginPage = () => {
           }}
         />
         <motion.div
-          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-indigo-200 rounded-full mix-blend-multiply filter blur-xl opacity-70"
+          className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-tbz-blue/20 rounded-full mix-blend-multiply filter blur-xl opacity-70"
           animate={{
             scale: [1, 1.1, 1],
           }}
@@ -165,14 +165,14 @@ const LoginPage = () => {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md relative z-10"
       >
-        <Card className="w-full p-8 shadow-2xl backdrop-blur-sm bg-white/90 border border-white/20 space-y-8">
+        <Card className="w-full p-8 shadow-2xl backdrop-blur-sm bg-background/90 border border-border/20 space-y-8 brand-shadow">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.1, duration: 0.3 }}
             className="text-center space-y-3"
           >
-            <div className="mx-auto h-16 w-16 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 text-white flex items-center justify-center shadow-lg">
+            <div className="mx-auto h-16 w-16 rounded-full brand-gradient text-white flex items-center justify-center shadow-lg">
               <AnimatePresence mode="wait">
                 {isSuccess ? (
                   <motion.div
@@ -199,7 +199,7 @@ const LoginPage = () => {
             </div>
             <div>
               <motion.h1
-                className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"
+                className="text-3xl font-bold bg-gradient-to-r from-tbz-blue to-tbz-orange bg-clip-text text-transparent"
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2, duration: 0.3 }}
@@ -223,7 +223,7 @@ const LoginPage = () => {
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+                className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 px-4 py-3 text-sm text-destructive-foreground"
               >
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                 <span>{errorMessage}</span>
@@ -234,7 +234,7 @@ const LoginPage = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"
+                className="flex items-center gap-2 rounded-md border border-success bg-success/10 px-4 py-3 text-sm text-success-foreground"
               >
                 <CheckCircle className="h-4 w-4" />
                 <span>Login successful! Redirecting...</span>
