@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ThemeToggle } from "../../lib/theme";
 import MobileNav from "../ui/mobile-nav";
 import SearchInput from "../ui/search-input";
+import CommandPalette from "../CommandPalette";
 
 const STORAGE_KEY = "tbz-sidebar";
 const HELP_LINK = "https://intranet.teambuilderz/policies";
@@ -249,6 +250,7 @@ const DashboardLayout = ({
                 </div>
               </div>
               <div className="hidden lg:flex items-center gap-3">
+                <CommandPalette />
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => setCommandPaletteOpen(true)}>
                   <Command size={16} />
                   Quick actions
