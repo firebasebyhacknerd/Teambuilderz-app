@@ -36,32 +36,32 @@ router.post('/attendance', authenticateToken, requireAdmin, async (req, res) => 
     
     let query = `
       SELECT 
-        a.*,
+        ae.*,
         u.name as user_name,
         u.email as user_email
-      FROM attendance a
-      JOIN users u ON a.user_id = u.id
+      FROM attendance_entries ae
+      JOIN users u ON ae.user_id = u.id
       WHERE 1=1
     `;
     const params = [];
     let paramIndex = 1;
     
     if (dateFrom) {
-      query += ` AND a.attendance_date >= $${paramIndex++}`;
+      query += ` AND ae.attendance_date >= $${paramIndex++}`;
       params.push(dateFrom);
     }
     
     if (dateTo) {
-      query += ` AND a.attendance_date <= $${paramIndex++}`;
+      query += ` AND ae.attendance_date <= $${paramIndex++}`;
       params.push(dateTo);
     }
     
     if (userId) {
-      query += ` AND a.user_id = $${paramIndex++}`;
+      query += ` AND ae.user_id = $${paramIndex++}`;
       params.push(userId);
     }
     
-    query += ` ORDER BY a.attendance_date DESC, u.name`;
+    query += ` ORDER BY ae.attendance_date DESC, u.name`;
     
     const result = await pool.query(query, params);
     
@@ -95,7 +95,7 @@ router.post('/candidates', authenticateToken, async (req, res) => {
         c.*,
         u.name as recruiter_name
       FROM candidates c
-      LEFT JOIN users u ON c.recruiter_id = u.id
+      LEFT JOIN users u ON c.assigned_recruiter_id = u.id
       WHERE 1=1
     `;
     const params = [];
@@ -103,17 +103,17 @@ router.post('/candidates', authenticateToken, async (req, res) => {
     
     // Non-admin users can only see their assigned candidates
     if (userRole !== 'Admin' && userId) {
-      query += ` AND c.recruiter_id = $${paramIndex++}`;
+      query += ` AND c.assigned_recruiter_id = $${paramIndex++}`;
       params.push(userId);
     }
     
     if (stage) {
-      query += ` AND c.stage = $${paramIndex++}`;
+      query += ` AND c.current_stage = $${paramIndex++}`;
       params.push(stage);
     }
     
     if (recruiterId && userRole === 'Admin') {
-      query += ` AND c.recruiter_id = $${paramIndex++}`;
+      query += ` AND c.assigned_recruiter_id = $${paramIndex++}`;
       params.push(recruiterId);
     }
     
@@ -233,16 +233,16 @@ router.post('/applications', authenticateToken, async (req, res) => {
     }
     
     if (dateFrom) {
-      query += ` AND a.applied_date >= $${paramIndex++}`;
+      query += ` AND a.application_date >= $${paramIndex++}`;
       params.push(dateFrom);
     }
     
     if (dateTo) {
-      query += ` AND a.applied_date <= $${paramIndex++}`;
+      query += ` AND a.application_date <= $${paramIndex++}`;
       params.push(dateTo);
     }
     
-    query += ` ORDER BY a.applied_date DESC`;
+    query += ` ORDER BY a.application_date DESC`;
     
     const result = await pool.query(query, params);
     
@@ -274,13 +274,10 @@ router.post('/interviews', authenticateToken, async (req, res) => {
       SELECT 
         i.*,
         c.name as candidate_name,
-        u.name as recruiter_name,
-        comp.name as company_name
+        u.name as recruiter_name
       FROM interviews i
       JOIN candidates c ON i.candidate_id = c.id
       LEFT JOIN users u ON i.recruiter_id = u.id
-      LEFT JOIN applications a ON i.application_id = a.id
-      LEFT JOIN companies comp ON a.company_id = comp.id
       WHERE 1=1
     `;
     const params = [];
@@ -298,21 +295,21 @@ router.post('/interviews', authenticateToken, async (req, res) => {
     }
     
     if (type) {
-      query += ` AND i.type = $${paramIndex++}`;
+      query += ` AND i.interview_type = $${paramIndex++}`;
       params.push(type);
     }
     
     if (dateFrom) {
-      query += ` AND i.interview_date >= $${paramIndex++}`;
+      query += ` AND i.scheduled_date >= $${paramIndex++}`;
       params.push(dateFrom);
     }
     
     if (dateTo) {
-      query += ` AND i.interview_date <= $${paramIndex++}`;
+      query += ` AND i.scheduled_date <= $${paramIndex++}`;
       params.push(dateTo);
     }
     
-    query += ` ORDER BY i.interview_date DESC`;
+    query += ` ORDER BY i.scheduled_date DESC`;
     
     const result = await pool.query(query, params);
     
