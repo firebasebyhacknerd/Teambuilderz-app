@@ -35,7 +35,7 @@ const rangeOptions = [
 const selectClass =
   'h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
 
-const ApplicationActivityPage = () => {
+const ApplicationActivityPage = ({ now }) => {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Admin');
@@ -64,6 +64,8 @@ const ApplicationActivityPage = () => {
     }
   }, [router]);
 
+  const baseToday = useMemo(() => new Date(now || Date.now()), [now]);
+
   const rangeConfig = useMemo(() => {
     const toStr = (date) => date.toISOString().split('T')[0];
 
@@ -86,7 +88,7 @@ const ApplicationActivityPage = () => {
 
     const option =
       rangeOptions.find((item) => item.value === range && item.days) ?? rangeOptions[1];
-    const today = new Date();
+    const today = baseToday;
     const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startDate = new Date(endDate);
     startDate.setDate(endDate.getDate() - ((option.days ?? 30) - 1));
@@ -98,7 +100,7 @@ const ApplicationActivityPage = () => {
       startDateStr: toStr(startDate),
       endDateStr: toStr(endDate),
     };
-  }, [customRange.end, customRange.start, range]);
+  }, [baseToday, customRange.end, customRange.start, range]);
 
   const filterParams = useMemo(
     () => ({
@@ -591,6 +593,14 @@ const ApplicationActivityPage = () => {
     </DashboardLayout>
   );
 };
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      now: new Date().toISOString(),
+    },
+  };
+}
 
 export default ApplicationActivityPage;
 

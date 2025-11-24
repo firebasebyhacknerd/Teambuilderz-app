@@ -34,8 +34,8 @@ const formatDateIso = (date) => {
   return source.toISOString().split('T')[0];
 };
 
-const presetRange = (preset) => {
-  const today = new Date();
+const presetRange = (preset, baseDate = new Date()) => {
+  const today = baseDate instanceof Date ? baseDate : new Date(baseDate);
   const todayIso = formatDateIso(today);
   if (preset === 'today') {
     return { from: todayIso, to: todayIso };
@@ -111,14 +111,15 @@ const effectiveStatusFromRecord = (record) => {
   return 'pending';
 };
 
-const AdminAttendancePage = () => {
+const AdminAttendancePage = ({ now }) => {
   const router = useRouter();
-  const [token, setToken] = useState('');
-  const todayIso = useMemo(() => formatDateIso(new Date()), []);
+  const today = useMemo(() => new Date(now || Date.now()), [now]);
+  const todayIso = useMemo(() => formatDateIso(today), [today]);
   const startOfMonthIso = useMemo(() => {
-    const { from } = presetRange('month');
+    const { from } = presetRange('month', today);
     return from;
-  }, []);
+  }, [today]);
+  const [token, setToken] = useState('');
 
   const [dateFrom, setDateFrom] = useState(startOfMonthIso);
   const [dateTo, setDateTo] = useState(todayIso);
@@ -1359,6 +1360,14 @@ const SummaryStat = ({ icon, label, value, accent, meta = null }) => (
     {meta ? <span className="text-xs text-muted-foreground">{meta}</span> : null}
   </div>
 );
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      now: new Date().toISOString(),
+    },
+  };
+}
 
 export default AdminAttendancePage;
 

@@ -54,7 +54,7 @@ const humanizeLabel = (value) => {
   return formatted || 'N/A';
 };
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ now }) => {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Admin');
@@ -68,9 +68,10 @@ const AdminDashboard = () => {
     [],
   );
   const [range, setRange] = useState('today');
+  const baseToday = useMemo(() => new Date(now || Date.now()), [now]);
   const rangeConfig = useMemo(() => {
     const option = rangeOptions.find((item) => item.value === range) ?? rangeOptions[0];
-    const today = new Date();
+    const today = baseToday;
     const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startDate = new Date(endDate);
     startDate.setDate(endDate.getDate() - (option.days - 1));
@@ -82,7 +83,7 @@ const AdminDashboard = () => {
       startDateStr: format(startDate),
       endDateStr: format(endDate),
     };
-  }, [range, rangeOptions]);
+  }, [baseToday, range, rangeOptions]);
   const rangeParams = useMemo(
     () => ({
       date_from: rangeConfig.startDateStr,
@@ -1815,6 +1816,14 @@ const NotificationAlert = ({ alert }) => (
     </p>
   </div>
 );
+
+export async function getServerSideProps() {
+  return {
+    props: {
+      now: new Date().toISOString(),
+    },
+  };
+}
 
 export default AdminDashboard;
 
