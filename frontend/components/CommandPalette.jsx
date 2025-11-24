@@ -271,7 +271,7 @@ const CommandPalette = () => {
                 <div className="max-h-96 overflow-y-auto">
                   {Object.entries(groupedCommands).length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
-                      <p>No commands found for "{query}"</p>
+                      <p>No commands found for &quot;{query}&quot;</p>
                     </div>
                   ) : (
                     Object.entries(groupedCommands).map(([category, cmds]) => (

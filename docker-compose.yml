@@ -1,5 +1,6 @@
+version: "3.9"
+
 services:
-<<<<<<< Updated upstream
   tbz_postgres:
     image: postgres:15-alpine
     container_name: tbz_postgres
@@ -13,23 +14,24 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U teambuilderz_user -d teambuilderz"] 
+      test: ["CMD-SHELL", "pg_isready -U teambuilderz_user -d teambuilderz"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-=======
->>>>>>> Stashed changes
   tbz_backend:
-    build: 
-      context: ./backend 
+    build:
+      context: ./backend
       dockerfile: Dockerfile
     container_name: tbz_backend
     restart: unless-stopped
+    depends_on:
+      tbz_postgres:
+        condition: service_healthy
     ports:
       - "3001:3001"
     environment:
-      DB_HOST: host.docker.internal
+      DB_HOST: tbz_postgres
       DB_PORT: 5432
       DB_USER: teambuilderz_user
       DB_PASSWORD: teambuilderz_password
@@ -40,14 +42,8 @@ services:
       SECRETS_FILE: /run/secrets/tbz-backend.json
       ADMIN_PASSWORD: admin123
       RECRUITER_PASSWORD: recruit123
-<<<<<<< Updated upstream
-    depends_on:
-      tbz_postgres:
-        condition: service_healthy
     volumes:
       - ./secrets/backend.local.json:/run/secrets/tbz-backend.json:ro
-=======
->>>>>>> Stashed changes
 
   tbz_frontend:
     build:
@@ -55,13 +51,13 @@ services:
       dockerfile: Dockerfile
     container_name: tbz_frontend
     restart: unless-stopped
+    depends_on:
+      - tbz_backend
     ports:
       - "3000:3000"
     environment:
-      - NODE_ENV=production
-    depends_on:
-<<<<<<< Updated upstream
-      - tbz_backend
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NODE_ENV: production
 
   tbz_proxy:
     image: nginx:1.27-alpine
@@ -76,9 +72,6 @@ services:
     volumes:
       - ./ops/reverse-proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./certs:/etc/nginx/certs:ro
-    
+
 volumes:
   postgres_data:
-=======
-      - tbz_backend
->>>>>>> Stashed changes

@@ -22,33 +22,36 @@ const NotificationCenter = () => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Add notification
-  const addNotification = useCallback((notification) => {
-    const id = Date.now();
-    const newNotification = {
-      id,
-      timestamp: new Date(),
-      read: false,
-      ...notification,
-    };
-
-    setNotifications((prev) => [newNotification, ...prev].slice(0, 50)); // Keep last 50
-    setUnreadCount((prev) => prev + 1);
-
-    // Auto-dismiss after 5 seconds if not important
-    if (notification.type !== 'error') {
-      setTimeout(() => {
-        dismissNotification(id);
-      }, 5000);
-    }
-
-    return id;
-  }, []);
-
   // Dismiss notification
   const dismissNotification = useCallback((id) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
+
+  // Add notification
+  const addNotification = useCallback(
+    (notification) => {
+      const id = Date.now();
+      const newNotification = {
+        id,
+        timestamp: new Date(),
+        read: false,
+        ...notification,
+      };
+
+      setNotifications((prev) => [newNotification, ...prev].slice(0, 50)); // Keep last 50
+      setUnreadCount((prev) => prev + 1);
+
+      // Auto-dismiss after 5 seconds if not important
+      if (notification.type !== 'error') {
+        setTimeout(() => {
+          dismissNotification(id);
+        }, 5000);
+      }
+
+      return id;
+    },
+    [dismissNotification],
+  );
 
   // Mark as read
   const markAsRead = useCallback((id) => {

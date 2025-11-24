@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Download, Filter, Search, Calendar, User, Activity, Clock } from 'lucide-react';
 import { Button } from './ui/button';
@@ -31,39 +31,42 @@ const AuditLogs = () => {
   });
 
   // Fetch audit logs
-  const fetchLogs = async (offset = 0) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        limit: pagination.limit,
-        offset,
-        ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
-      });
+  const fetchLogs = useCallback(
+    async (offset = 0) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          limit: pagination.limit,
+          offset,
+          ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)),
+        });
 
-      const response = await fetch(`${API_URL}/api/v1/audit/logs?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'x-user-role': localStorage.getItem('userRole'),
-        },
-      });
+        const response = await fetch(`${API_URL}/api/v1/audit/logs?${params}`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            'x-user-role': localStorage.getItem('userRole'),
+          },
+        });
 
-      if (!response.ok) throw new Error('Failed to fetch logs');
+        if (!response.ok) throw new Error('Failed to fetch logs');
 
-      const data = await response.json();
-      setLogs(data.logs);
-      setPagination(data.pagination);
-    } catch (error) {
-      toast.error('Failed to fetch audit logs');
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        const data = await response.json();
+        setLogs(data.logs);
+        setPagination(data.pagination);
+      } catch (error) {
+        toast.error('Failed to fetch audit logs');
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [filters, pagination.limit],
+  );
 
   // Initial load
   useEffect(() => {
     fetchLogs(0);
-  }, []);
+  }, [fetchLogs]);
 
   // Handle filter change
   const handleFilterChange = (key, value) => {

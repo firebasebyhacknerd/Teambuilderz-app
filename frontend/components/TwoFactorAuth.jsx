@@ -153,7 +153,7 @@ const TwoFactorAuth = ({ onSetupComplete = null, onVerify = null }) => {
           </div>
 
           <p className="text-muted-foreground mb-6">
-            Choose how you'd like to secure your account with a second verification step.
+            Choose how you would like to secure your account with a second verification step.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
