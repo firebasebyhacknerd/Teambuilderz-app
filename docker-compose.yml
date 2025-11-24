@@ -1,4 +1,5 @@
 services:
+<<<<<<< Updated upstream
   tbz_postgres:
     image: postgres:15-alpine
     container_name: tbz_postgres
@@ -17,6 +18,8 @@ services:
       timeout: 5s
       retries: 5
 
+=======
+>>>>>>> Stashed changes
   tbz_backend:
     build: 
       context: ./backend 
@@ -26,7 +29,7 @@ services:
     ports:
       - "3001:3001"
     environment:
-      DB_HOST: tbz_postgres
+      DB_HOST: host.docker.internal
       DB_PORT: 5432
       DB_USER: teambuilderz_user
       DB_PASSWORD: teambuilderz_password
@@ -35,11 +38,16 @@ services:
       CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000,http://tbz_frontend:3000,http://host.docker.internal:3000,https://localhost
       ENFORCE_TLS: "false"
       SECRETS_FILE: /run/secrets/tbz-backend.json
+      ADMIN_PASSWORD: admin123
+      RECRUITER_PASSWORD: recruit123
+<<<<<<< Updated upstream
     depends_on:
       tbz_postgres:
         condition: service_healthy
     volumes:
       - ./secrets/backend.local.json:/run/secrets/tbz-backend.json:ro
+=======
+>>>>>>> Stashed changes
 
   tbz_frontend:
     build:
@@ -52,6 +60,7 @@ services:
     environment:
       - NODE_ENV=production
     depends_on:
+<<<<<<< Updated upstream
       - tbz_backend
 
   tbz_proxy:
@@ -70,3 +79,6 @@ services:
     
 volumes:
   postgres_data:
+=======
+      - tbz_backend
+>>>>>>> Stashed changes

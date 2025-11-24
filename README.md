@@ -1,4 +1,4 @@
-﻿# TeamBuilderz Admin Portal
+# TeamBuilderz Admin Portal
 
 TeamBuilderz is a modern, real-time staffing operations platform designed for internal LAN use. It helps recruiters and admins manage candidate pipelines efficiently. This version is a web application built with Next.js for the frontend and an Express.js API for the backend, using PostgreSQL as the database.
 
@@ -55,7 +55,7 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
 
    ```sql
    CREATE DATABASE teambuilderz;
-   CREATE USER teambuilderz_user WITH PASSWORD 'teambuilderz_password';
+   CREATE USER teambuilderz_user WITH PASSWORD '<your_secure_password>';
    GRANT ALL PRIVILEGES ON DATABASE teambuilderz TO teambuilderz_user;
    ```
 
@@ -68,7 +68,7 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
      DB_PORT=5432
      DB_NAME=teambuilderz
      DB_USER=teambuilderz_user
-     DB_PASSWORD=teambuilderz_password
+     DB_PASSWORD=<your_secure_password>
      JWT_SECRET=your_super_secret_jwt_key_here_change_in_production
      BACKEND_PORT=3001
      ```
@@ -120,6 +120,7 @@ TeamBuilderz is a modern, real-time staffing operations platform designed for in
 
 7. **Log in with default credentials**
    - Define secure admin/recruiter accounts via environment variables (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, etc.) or invite users through the Admin → Team Management page after deployment.
+   - Default admin and recruiter users are created on initial database setup. You can log in using those credentials. For production environments, it is strongly recommended to change these default passwords immediately after the first login.
 
 ---
 
@@ -240,7 +241,7 @@ On Windows you can fully automate container start-up with:
 2. **Register a scheduled task that runs `docker compose up -d` after you sign in**  
    Open an elevated PowerShell prompt in the repo root and run:
    ```powershell
-   $task = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"cd `"$PWD`"; docker compose up -d`""
+   $task = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"cd `"$PWD`"; docker compose up -d`"""
    Register-ScheduledTask -TaskName "TeamBuilderz Auto Start" -Action $task -Trigger (New-ScheduledTaskTrigger -AtLogOn) -RunLevel Highest
    ```
    The next time you log in, Docker Desktop will boot and the scheduled task will bring the stack up without manual clicks.
@@ -382,5 +383,3 @@ If you encounter setup issues:
 - Reach out to the TeamBuilderz engineering channel with log excerpts and steps taken.
 
 Happy building! 🚀
-
-
