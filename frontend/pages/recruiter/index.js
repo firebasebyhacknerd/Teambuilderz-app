@@ -1,7 +1,24 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useCallback } from 'react';
-import { UserCheck, ChevronRight, LogOut, Users, FileText, AlertTriangle, CircleUser, Home, TrendingUp, Clock, CalendarCheck } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import {
+  UserCheck,
+  ChevronRight,
+  LogOut,
+  Users,
+  FileText,
+  AlertTriangle,
+  CircleUser,
+  Home,
+  TrendingUp,
+  Clock,
+  CalendarCheck,
+  CheckCircle2,
+  Sunrise,
+  Plane,
+  Ban,
+} from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -34,11 +51,19 @@ const humanize = (value) => {
 
 const attendanceStatusTone = {
   present: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  'half-day': 'bg-amber-50 text-amber-800 border border-amber-200',
   absent: 'bg-red-100 text-red-800 border border-red-200',
   pending: 'bg-amber-100 text-amber-800 border border-amber-200',
   unmarked: 'bg-slate-100 text-slate-700 border border-slate-200',
   rejected: 'bg-rose-100 text-rose-800 border border-rose-200',
 };
+
+const attendanceStatusOptions = [
+  { value: 'present', label: 'Present', desc: 'Full day', icon: CheckCircle2, tone: 'text-emerald-700' },
+  { value: 'half-day', label: 'Half Day', desc: 'Partial', icon: Sunrise, tone: 'text-amber-700' },
+  { value: 'leave', label: 'Leave', desc: 'Planned', icon: Plane, tone: 'text-blue-700' },
+  { value: 'absent', label: 'Absent', desc: 'Unplanned', icon: Ban, tone: 'text-rose-700' },
+];
 
 const RecruiterDashboard = () => {
   const router = useRouter();
@@ -49,6 +74,7 @@ const RecruiterDashboard = () => {
   const [weeklyAvg, setWeeklyAvg] = useState(0);
   const [monthlyAvg, setMonthlyAvg] = useState(0);
   const [userName, setUserName] = useState('Recruiter');
+  const [attendanceStatus, setAttendanceStatus] = useState('present');
   const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
   const monthStartIso = useMemo(() => {
     const today = new Date();
@@ -181,16 +207,7 @@ const RecruiterDashboard = () => {
     data: attendanceData,
     isFetching: attendanceLoading,
   } = useAttendanceQuery(token, attendanceQueryParams, Boolean(token));
-  const submitAttendance = useSubmitAttendanceMutation(token, {
-    onSuccess: () => {
-      setAttendanceMessage({ type: 'success', text: 'Attendance submitted for admin approval.' });
-      emitRefresh(REFRESH_CHANNELS.ATTENDANCE);
-      emitRefresh(REFRESH_CHANNELS.DASHBOARD);
-    },
-    onError: (error) => {
-      setAttendanceMessage({ type: 'error', text: error.message || 'Unable to submit attendance.' });
-    },
-  });
+  const submitAttendance = useSubmitAttendanceMutation(token);
   const { data: notificationsData } = useNotificationsQuery(token, metricsEnabled);
   const [toastAlert, setToastAlert] = useState(null);
   const [lastAlertKey, setLastAlertKey] = useState(null);
@@ -224,7 +241,7 @@ const RecruiterDashboard = () => {
   const attendanceEffective = todayAttendance?.effectiveStatus ?? 'unmarked';
   const attendanceApproval = todayAttendance?.approvalStatus ?? (todayAttendance ? 'pending' : 'not-submitted');
   const attendanceDisplayStatus = attendanceEffective === 'unmarked' ? 'not-submitted' : attendanceEffective;
-  const isApprovedPresent =
+  const isApprovedFullPresent =
     Boolean(todayAttendance) &&
     todayAttendance.effectiveStatus === 'present' &&
     (todayAttendance.approvalStatus === 'approved' || todayAttendance.approvalStatus === 'auto');
@@ -239,26 +256,51 @@ const RecruiterDashboard = () => {
       return 'Weekend counted as leave because Friday and Monday are approved absences.';
     }
     if (todayAttendance.approvalStatus === 'pending') {
+      if (todayAttendance.reportedStatus === 'half-day') {
+        return 'Half day submitted; waiting for admin approval.';
+      }
       return 'Waiting for admin approval. You can resubmit if needed.';
     }
     if (todayAttendance.approvalStatus === 'approved') {
-      return todayAttendance.reportedStatus === 'present'
-        ? 'Admin approved your presence for today.'
-        : 'Admin marked today as leave.';
+      if (todayAttendance.reportedStatus === 'present') {
+        return 'Admin approved your presence for today.';
+      }
+      if (todayAttendance.reportedStatus === 'half-day') {
+        return 'Admin approved a half day for today.';
+      }
+      return 'Admin marked today as leave.';
     }
     if (todayAttendance.approvalStatus === 'rejected') {
       return 'Submission rejected. Submit again if you were present.';
     }
     return 'Attendance requires attention.';
   }, [todayAttendance]);
-  const submitAttendanceDisabled = submitAttendance.isPending || isApprovedPresent;
+  const submitAttendanceDisabled = submitAttendance.isPending || isApprovedFullPresent;
 
   const handleAttendanceSubmit = () => {
     setAttendanceMessage(null);
-    submitAttendance.mutate({
-      attendance_date: todayIso,
-      status: 'present',
-    });
+    submitAttendance.mutate(
+      {
+        attendance_date: todayIso,
+        status: attendanceStatus,
+      },
+      {
+        onSuccess: () => {
+          setAttendanceMessage({
+            type: 'success',
+            text: `Submitted ${humanize(attendanceStatus)} for admin approval.`,
+          });
+          toast.success(`Submitted ${humanize(attendanceStatus)}`);
+          setAttendanceStatus('present');
+          emitRefresh(REFRESH_CHANNELS.ATTENDANCE);
+          emitRefresh(REFRESH_CHANNELS.DASHBOARD);
+        },
+        onError: (error) => {
+          setAttendanceMessage({ type: 'error', text: error.message || 'Unable to submit attendance.' });
+          toast.error(error.message || 'Unable to submit attendance.');
+        },
+      },
+    );
   };
 
   useEffect(() => {
@@ -420,36 +462,44 @@ const RecruiterDashboard = () => {
           </div>
         </div>
       ) : null}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="rounded-xl bg-gradient-to-r from-primary/90 via-primary to-primary/80 text-primary-foreground p-4 sm:p-5 shadow-lg shadow-primary/20">
+          <div className="text-xs uppercase tracking-wide opacity-80">Attendance</div>
+          <div className="text-2xl font-semibold mt-1">{humanize(attendanceDisplayStatus)}</div>
+          <div className="text-sm opacity-80 mt-1">
+            {todayAttendance ? (attendanceApproval === 'auto' ? 'Weekend auto present' : `Admin: ${attendanceApproval}`) : 'Not submitted yet'}
+          </div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-r from-emerald-500/90 via-emerald-500 to-emerald-600 text-white p-4 sm:p-5 shadow-lg shadow-emerald-500/20">
+          <div className="text-xs uppercase tracking-wide opacity-90">Today&apos;s Applications</div>
+          <div className="text-2xl font-semibold mt-1">{totalAppsToday} / {DAILY_TARGET}</div>
+          <div className="text-sm opacity-90 mt-1">{Math.round(progressPercent)}% of daily target</div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-r from-amber-400/90 via-amber-400 to-amber-500 text-amber-950 p-4 sm:p-5 shadow-lg shadow-amber-400/30">
+          <div className="text-xs uppercase tracking-wide opacity-90">Alerts</div>
+          <div className="text-2xl font-semibold mt-1">{notificationsData?.alerts?.length ?? 0}</div>
+          <div className="text-sm opacity-90 mt-1 flex items-center gap-2">
+            <span>Pending attention</span>
+            <Button size="sm" variant="outline" className="border-amber-700/40 text-amber-900 bg-white/70 hover:bg-white" onClick={handleToastView}>
+              View
+            </Button>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <Card className="p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <CalendarCheck className="text-primary h-6 w-6" />
-            <div>
-              <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Attendance</p>
-              <h2 className="text-xl font-semibold text-foreground">Today</h2>
-            </div>
-          </div>
-          {attendanceMessage ? (
-            <div
-              className={`rounded-lg border px-3 py-2 text-xs ${
-                attendanceMessage.type === 'success'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                  : 'border-rose-200 bg-rose-50 text-rose-900'
-              }`}
-            >
-              {attendanceMessage.text}
-            </div>
-          ) : null}
-          <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3">
             <Badge
               variant="outline"
               className={`capitalize ${attendanceStatusTone[attendanceEffective] ?? 'bg-slate-100 text-slate-700 border border-slate-200'}`}
             >
-              {attendanceDisplayStatus}
+              {humanize(attendanceDisplayStatus)}
             </Badge>
             <span className="text-xs text-muted-foreground">
               {attendanceLoading
-                ? 'Refreshing status…'
+                ? 'Refreshing status.'
                 : todayAttendance
                   ? attendanceApproval === 'auto'
                     ? 'Weekend auto present'
@@ -459,8 +509,47 @@ const RecruiterDashboard = () => {
                   : 'No submission yet.'}
             </span>
           </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground font-medium">Select today&apos;s status</p>
+              <span className="text-[11px] text-muted-foreground/80">Sent for approval</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {attendanceStatusOptions.map((option) => {
+                const Icon = option.icon;
+                const isActive = attendanceStatus === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setAttendanceStatus(option.value)}
+                    className={`group relative overflow-hidden rounded-lg border text-left transition-all duration-200 ${
+                      isActive
+                        ? 'border-primary/60 bg-primary/10 shadow-sm shadow-primary/10 scale-[1.01]'
+                        : 'border-border hover:border-primary/30 hover:bg-primary/5'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 px-3 py-2">
+                      <span
+                        className={`rounded-full bg-white/80 p-1 ring-1 ring-black/5 transition-transform duration-200 group-hover:scale-105 ${option.tone}`}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-foreground">{option.label}</span>
+                        <span className="text-[11px] text-muted-foreground">{option.desc}</span>
+                      </div>
+                    </div>
+                    {isActive ? (
+                      <div className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-primary/0 via-primary/60 to-primary/0" />
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <Button className="w-full" onClick={handleAttendanceSubmit} disabled={submitAttendanceDisabled}>
-            {submitAttendance.isPending ? 'Submitting…' : 'Submit attendance'}
+            {submitAttendance.isPending ? 'Submitting.' : 'Submit attendance'}
           </Button>
           <p className="text-xs text-muted-foreground leading-relaxed">{attendanceStatusDetail}</p>
         </Card>
@@ -827,6 +916,7 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
+
 
 
 

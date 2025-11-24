@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { CheckCircle2, XCircle, Clock, CalendarCheck, Loader2 } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, CalendarCheck, Loader2, Sunrise } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -24,8 +24,24 @@ const formatDateIso = (date) => {
   return source.toISOString().split('T')[0];
 };
 
+const presetRange = (preset) => {
+  const today = new Date();
+  const todayIso = formatDateIso(today);
+  if (preset === 'today') {
+    return { from: todayIso, to: todayIso };
+  }
+  if (preset === 'week') {
+    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 6));
+    return { from: formatDateIso(start), to: todayIso };
+  }
+  // default month
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+  return { from: formatDateIso(start), to: todayIso };
+};
+
 const statusTone = {
   present: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  'half-day': 'bg-amber-50 text-amber-800 border border-amber-200',
   absent: 'bg-red-100 text-red-800 border border-red-200',
   pending: 'bg-amber-100 text-amber-800 border border-amber-200',
   rejected: 'bg-rose-100 text-rose-800 border border-rose-200',
@@ -38,7 +54,13 @@ const effectiveStatusFromRecord = (record) => {
     return 'pending';
   }
   if (record.approvalStatus === 'approved') {
-    return record.reportedStatus === 'present' ? 'present' : 'absent';
+    if (record.reportedStatus === 'present') {
+      return 'present';
+    }
+    if (record.reportedStatus === 'half-day') {
+      return 'half-day';
+    }
+    return 'absent';
   }
   if (record.approvalStatus === 'rejected') {
     return 'rejected';
@@ -51,13 +73,13 @@ const AdminAttendancePage = () => {
   const [token, setToken] = useState('');
   const todayIso = useMemo(() => formatDateIso(new Date()), []);
   const startOfMonthIso = useMemo(() => {
-    const today = new Date();
-    const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    return formatDateIso(start);
+    const { from } = presetRange('month');
+    return from;
   }, []);
 
   const [dateFrom, setDateFrom] = useState(startOfMonthIso);
   const [dateTo, setDateTo] = useState(todayIso);
+  const [activePreset, setActivePreset] = useState('month');
   const [selectedRecruiter, setSelectedRecruiter] = useState('all');
   const [pendingOnly, setPendingOnly] = useState(false);
   const [actionMessage, setActionMessage] = useState(null);
@@ -165,6 +187,7 @@ const AdminAttendancePage = () => {
 
   const summary = attendanceData?.summary ?? {
     present: 0,
+    halfDay: 0,
     absent: 0,
     pending: 0,
     autoPresent: 0,
@@ -194,14 +217,14 @@ const AdminAttendancePage = () => {
     >
       <div className="space-y-6">
         <Card className="p-0 overflow-hidden">
-          <div className="px-6 py-4 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="px-6 py-4 border-b border-border flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Filters</h2>
               <p className="text-xs text-muted-foreground">
                 Use the filters to inspect a specific recruiter or timeframe.
               </p>
             </div>
-            <Badge variant="outline" className="gap-2 text-xs">
+            <Badge variant="outline" className="gap-2 text-xs animate-[pulse_3s_ease-in-out_infinite]">
               <CalendarCheck size={14} />
               Range {attendanceData?.range?.dateFrom ?? dateFrom} → {attendanceData?.range?.dateTo ?? dateTo}
             </Badge>
@@ -218,6 +241,28 @@ const AdminAttendancePage = () => {
                 {actionMessage.text}
               </div>
             ) : null}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { key: 'today', label: 'Today' },
+                { key: 'week', label: 'Last 7 days' },
+                { key: 'month', label: 'This month' },
+              ].map((preset) => (
+                <Button
+                  key={preset.key}
+                  variant={activePreset === preset.key ? 'default' : 'outline'}
+                  size="sm"
+                  className="rounded-full transition-transform duration-150 hover:-translate-y-0.5"
+                  onClick={() => {
+                    const range = presetRange(preset.key);
+                    setDateFrom(range.from);
+                    setDateTo(range.to);
+                    setActivePreset(preset.key);
+                  }}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="attendance-from">From</Label>
@@ -277,12 +322,18 @@ const AdminAttendancePage = () => {
           <p className="text-xs text-muted-foreground">
             Approved attendance counts reflect only admin-approved or auto weekend days.
           </p>
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
             <SummaryStat
               icon={<CheckCircle2 className="h-4 w-4 text-emerald-600" />}
               label="Approved Presents"
               value={summary.present}
               accent="bg-emerald-50 text-emerald-900"
+            />
+            <SummaryStat
+              icon={<Sunrise className="h-4 w-4 text-amber-600" />}
+              label="Approved Half Days"
+              value={summary.halfDay}
+              accent="bg-amber-50 text-amber-900"
             />
             <SummaryStat
               icon={<XCircle className="h-4 w-4 text-red-600" />}
@@ -315,7 +366,7 @@ const AdminAttendancePage = () => {
               </p>
             </div>
             <Badge variant="outline" className="text-xs">
-              {attendanceLoading ? 'Loading entries…' : `${records.length} entries`}
+              {attendanceLoading ? 'Loading entriesâ€¦' : `${records.length} entries`}
             </Badge>
           </div>
           <div className="mt-4 overflow-x-auto">
@@ -373,7 +424,7 @@ const AdminAttendancePage = () => {
                           {record.reviewerNote ? (
                             <span className="text-xs text-muted-foreground">{record.reviewerNote}</span>
                           ) : (
-                            <span className="text-xs text-slate-400">—</span>
+                            <span className="text-xs text-slate-400">â€”</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
@@ -394,6 +445,23 @@ const AdminAttendancePage = () => {
                             >
                               {isRowBusy && <Loader2 className="h-3 w-3 animate-spin" />}
                               Mark Present
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              className="gap-1"
+                              disabled={isUpdating}
+                              onClick={() =>
+                                handleUpdate(record.id, {
+                                  status: 'half-day',
+                                  approval_status: 'approved',
+                                })
+                              }
+                              aria-live="polite"
+                              aria-busy={isRowBusy}
+                            >
+                              {isRowBusy && <Loader2 className="h-3 w-3 animate-spin" />}
+                              Mark Half Day
                             </Button>
                             <Button
                               size="xs"
@@ -483,6 +551,7 @@ const AdminAttendancePage = () => {
                 onChange={(event) => setNewEntry((prev) => ({ ...prev, status: event.target.value }))}
               >
                 <option value="present">Present</option>
+                <option value="half-day">Half Day</option>
                 <option value="absent">Absent</option>
                 <option value="leave">Leave</option>
               </select>
@@ -547,7 +616,7 @@ const AdminAttendancePage = () => {
                         {day.sandwichApplied ? 'sandwich-adjusted' : day.source}
                       </td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">
-                        {day.approvalStatus || '—'}
+                        {day.approvalStatus || 'â€”'}
                       </td>
                     </tr>
                   ))}
@@ -573,6 +642,8 @@ const SummaryStat = ({ icon, label, value, accent, meta = null }) => (
 );
 
 export default AdminAttendancePage;
+
+
 
 
 

@@ -13,7 +13,7 @@ const positiveInt = z.number({ coerce: true }).int().positive();
 const nonNegativeInt = z.number({ coerce: true }).int().nonnegative();
 
 const stageEnum = z.enum(['onboarding', 'marketing', 'interviewing', 'offered', 'placed', 'inactive']);
-const attendanceStatuses = z.enum(['present', 'absent', 'leave']);
+const attendanceStatuses = z.enum(['present', 'half-day', 'absent', 'leave']);
 const attendanceApprovalStatuses = z.enum(['pending', 'approved', 'rejected']);
 
 const optionalString = (max) => z.string().max(max).trim().optional().or(z.literal('')).transform((v) => (v ? v : null));

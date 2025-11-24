@@ -290,7 +290,7 @@ async function ensureEnums(db) {
     CREATE TYPE reminder_status AS ENUM ('pending', 'sent', 'snoozed', 'dismissed');
     CREATE TYPE alert_status AS ENUM ('open', 'acknowledged', 'resolved');
     CREATE TYPE interview_type AS ENUM ('phone', 'video', 'in_person', 'technical', 'hr', 'final');
-    CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave');
+    CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave', 'half-day');
     CREATE TYPE attendance_approval_status AS ENUM ('pending', 'approved', 'rejected');
   `);
 }
@@ -682,6 +682,7 @@ async function ensureCandidateAssignments(db) {
 }
 
 async function ensureSchemaEvolution(db) {
+  console.log('--- DEBUG: Executing ensureSchemaEvolution ---');
   await Promise.all([
     ensureApplicationColumns(db),
     ensureInterviewColumns(db),
@@ -742,7 +743,7 @@ async function ensureAttendanceSchema(db) {
     DO $$
     BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_status') THEN
-        CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave');
+        CREATE TYPE attendance_status AS ENUM ('present', 'absent', 'leave', 'half-day');
       END IF;
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'attendance_approval_status') THEN
         CREATE TYPE attendance_approval_status AS ENUM ('pending', 'approved', 'rejected');
@@ -750,6 +751,8 @@ async function ensureAttendanceSchema(db) {
     END;
     $$;
   `);
+
+  await db.query(`ALTER TYPE attendance_status ADD VALUE IF NOT EXISTS 'half-day';`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS attendance_entries (
@@ -792,6 +795,7 @@ async function ensureAttendanceSchema(db) {
 }
 
 async function setupDatabase() {
+  console.log('--- DEBUG: Executing setupDatabase ---');
   try {
     const res = await pool.query(`
       SELECT EXISTS (
@@ -4575,7 +4579,13 @@ const attendanceStatusFromRow = (row) => {
     return 'unmarked';
   }
   if (row.approval_status === 'approved') {
-    return row.reported_status === 'present' ? 'present' : 'absent';
+    if (row.reported_status === 'present') {
+      return 'present';
+    }
+    if (row.reported_status === 'half-day') {
+      return 'half-day';
+    }
+    return 'absent';
   }
   if (row.approval_status === 'pending') {
     return 'pending';
@@ -4606,7 +4616,7 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
 
     const rawUserId = req.query?.user_id;
     const normalizedUserId = rawUserId === 'self' ? req.user.userId : rawUserId;
-    const allowedStatuses = ['present', 'absent', 'leave'];
+    const allowedStatuses = ['present', 'half-day', 'absent', 'leave'];
 
     let users = [];
     if (req.user.role === 'Admin') {
@@ -4659,7 +4669,7 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
         users: [],
         days: [],
         records: [],
-        summary: { present: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
+        summary: { present: 0, halfDay: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
       });
     }
 
@@ -4796,6 +4806,11 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
           return acc;
         }
 
+        if (day.effectiveStatus === 'half-day' && day.approvalStatus === 'approved') {
+          acc.halfDay += 1;
+          return acc;
+        }
+
         if (day.effectiveStatus === 'absent') {
           acc.absent += 1;
           if (day.sandwichApplied) {
@@ -4809,7 +4824,7 @@ app.get('/api/v1/attendance', verifyToken, async (req, res) => {
         }
         return acc;
       },
-      { present: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
+      { present: 0, halfDay: 0, absent: 0, pending: 0, autoPresent: 0, sandwichAbsent: 0 },
     );
 
     const pendingOnly = String(req.query?.pending_only || '').toLowerCase() === 'true';
@@ -4871,7 +4886,7 @@ app.post(
       const attendanceDateIso = toDateIso(attendanceDate);
 
       const reportedStatus = req.body.status || 'present';
-      const validStatuses = ['present', 'absent', 'leave'];
+      const validStatuses = ['present', 'half-day', 'absent', 'leave'];
       if (!validStatuses.includes(reportedStatus)) {
         return res.status(400).json({ message: 'Unsupported attendance status.' });
       }
@@ -5297,6 +5312,7 @@ async function initAuditStream() {
 }
 
 async function initializeInfrastructure({ skipDb } = {}) {
+  console.log('--- DEBUG: Executing initializeInfrastructure ---');
   if (skipDb) {
     console.log('Skipping database initialization as requested.');
     return;

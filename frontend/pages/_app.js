@@ -27,6 +27,21 @@ function MyApp({ Component, pageProps }) {
   const router = useRouter();
 
   useEffect(() => {
+    // Guard against any stray global references in legacy code chunks
+    if (typeof window !== 'undefined') {
+      const fallbackStageLabel = (value) => {
+        if (!value || typeof value !== 'string') return 'Unknown';
+        return value
+          .split('_')
+          .filter(Boolean)
+          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+          .join(' ');
+      };
+      if (typeof window.stageLabel !== 'function') {
+        window.stageLabel = fallbackStageLabel;
+      }
+    }
+
     if (typeof window === 'undefined' || typeof window.fetch !== 'function') {
       return;
     }

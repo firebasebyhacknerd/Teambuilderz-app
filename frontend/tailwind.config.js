@@ -18,7 +18,7 @@ module.exports = {
     },
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', ...fontFamily.sans]
+        sans: ['Poppins', 'system-ui', ...fontFamily.sans]
       },
       boxShadow: {
         ios: '0 10px 30px rgba(0, 0, 0, 0.1)',

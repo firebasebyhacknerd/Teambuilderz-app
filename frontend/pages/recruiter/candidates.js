@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { useCallback } from 'react';
 import { Users, Home, FileText, AlertTriangle, CircleUser, LogOut, Search, ChevronRight } from 'lucide-react';
@@ -10,6 +10,7 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { useCandidatesQuery } from '../../lib/queryHooks';
 import useAuthState from '../../lib/useAuthState';
+import API_URL from '../../lib/api';
 
 const stageStyles = {
   onboarding: 'bg-blue-100 text-blue-700',
@@ -29,7 +30,12 @@ const stageLabels = {
   inactive: 'Inactive',
 };
 
-const stageOptions = Object.entries(stageLabels).map(([value, label]) => ({ value, label }));
+const stageLabel = (value) => {
+  if (!value) return 'Unknown';
+  return stageLabels[value] || value;
+};
+
+const stageOptions = Object.keys(stageLabels).map((value) => ({ value, label: stageLabel(value) }));
 
 const CandidatesPage = () => {
   const router = useRouter();
@@ -37,6 +43,35 @@ const CandidatesPage = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [stageFilter, setStageFilter] = useState('all');
   const [assignmentFilter, setAssignmentFilter] = useState('all');
+
+  // Restore filters from localStorage (once ready)
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      const stored = window.localStorage.getItem('tbz-candidates-filters');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.searchTerm) setSearchTerm(parsed.searchTerm);
+        if (parsed.stageFilter) setStageFilter(parsed.stageFilter);
+        if (parsed.assignmentFilter) setAssignmentFilter(parsed.assignmentFilter);
+      }
+    } catch (error) {
+      console.warn('Unable to restore candidate filters', error);
+    }
+  }, [ready]);
+
+  // Persist filters
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      window.localStorage.setItem(
+        'tbz-candidates-filters',
+        JSON.stringify({ searchTerm, stageFilter, assignmentFilter }),
+      );
+    } catch (error) {
+      console.warn('Unable to persist candidate filters', error);
+    }
+  }, [searchTerm, stageFilter, assignmentFilter, ready]);
 
   const { data: candidates = [], isLoading } = useCandidatesQuery(token, Boolean(token));
 
@@ -140,7 +175,7 @@ const CandidatesPage = () => {
         </Button>
       }
     >
-      <Card className="p-4 sm:p-6 space-y-4">
+      <Card className="p-4 sm:p-6 space-y-4 border border-white/50 bg-white/70 backdrop-blur dark:bg-slate-900/80">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Candidate Directory</h2>
@@ -205,9 +240,9 @@ const CandidatesPage = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {hasActiveFilters ? null : <span className="text-muted-foreground">None</span>}
               {stageFilter !== 'all' ? (
-                <Badge variant="outline" className="text-xs">
-                  Stage: {stageLabels[stageFilter]}
-                </Badge>
+              <Badge variant="outline" className="text-xs">
+              Stage: {stageFilter === 'all' ? 'All' : stageLabel(stageFilter)}
+              </Badge>
               ) : null}
               {assignmentFilter !== 'all' ? (
                 <Badge variant="outline" className="text-xs">
@@ -229,8 +264,20 @@ const CandidatesPage = () => {
         ) : null}
 
         {isLoading ? (
-          <div className="h-32 flex items-center justify-center text-muted-foreground text-sm">
-            Loading candidates...
+          <div className="space-y-2">
+            {[1, 2, 3].map((key) => (
+              <div
+                key={key}
+                className="animate-pulse rounded-lg border border-border bg-card/60 p-4 sm:p-5 space-y-3"
+              >
+                <div className="h-4 w-40 bg-muted/60 rounded" />
+                <div className="h-3 w-64 bg-muted/50 rounded" />
+                <div className="flex gap-2">
+                  <div className="h-5 w-16 bg-muted/50 rounded-full" />
+                  <div className="h-5 w-24 bg-muted/50 rounded-full" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : filteredCandidates.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground space-y-3">
@@ -246,7 +293,7 @@ const CandidatesPage = () => {
             {filteredCandidates.map((candidate) => {
               const stage = candidate.current_stage || 'onboarding';
               const badgeTone = stageStyles[stage] ?? 'bg-slate-100 text-slate-700';
-              const stageLabelText = stageLabels[stage] || stage;
+              const stageLabelText = stageLabel(stage);
 
               return (
                 <div

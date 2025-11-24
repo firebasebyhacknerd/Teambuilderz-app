@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   User,
@@ -643,7 +643,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
         id: `note-${note.id}`,
         type: 'note',
         timestamp: note.createdAt || note.created_at,
-        title: note.author?.name ? `Note Â· ${note.author.name}` : 'Note added',
+        title: note.author?.name ? `Note · ${note.author.name}` : 'Note added',
         description: note.content,
         badge: note.reminder ? 'Reminder Set' : 'Note',
         tone: note.reminder
@@ -658,7 +658,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
         type: 'interview',
         timestamp: interview.scheduled_date || interview.created_at,
         title: `${formatLabel(interview.interview_type || 'interview')} interview`,
-        description: `${interview.company_name || 'Company not set'} Â· Round ${interview.round_number || 1}`,
+        description: `${interview.company_name || 'Company not set'} · Round ${interview.round_number || 1}`,
         badge: interview.status ? formatLabel(interview.status) : 'Interview',
         tone: interview.is_approved
           ? 'border border-emerald-200 bg-emerald-100 text-emerald-700'
@@ -688,6 +688,20 @@ const createAssessment = useCreateAssessmentMutation(token, {
       .filter((item) => item.timestamp)
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   }, [notes, candidateInterviews, candidateAssessments, formatLabel]);
+
+  const timelineGroups = useMemo(() => {
+    const groups = [];
+    timelineItems.forEach((item) => {
+      const dateKey = formatDate(item.timestamp);
+      const existing = groups.find((g) => g.dateLabel === dateKey);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        groups.push({ dateLabel: dateKey, items: [item] });
+      }
+    });
+    return groups;
+  }, [timelineItems, formatDate]);
 
   const handleTimelineFollowUp = useCallback(
     (item) => {
@@ -756,6 +770,46 @@ const createAssessment = useCreateAssessmentMutation(token, {
         <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>{stageLabel}</Badge>
       }
     >
+      <Card className="mb-6 p-4 sm:p-5 flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>
+              {stageLabel}
+            </Badge>
+            <div className="text-sm text-muted-foreground">
+              Assigned to{' '}
+              <span className="font-semibold text-foreground">
+                {candidate.recruiter_name || 'Unassigned'}
+              </span>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Last updated:{' '}
+              <span className="font-semibold text-foreground">
+                {formatDate(candidate.updated_at || candidate.created_at || new Date())}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => noteFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            >
+              <MessageSquare size={14} />
+              Add Note
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setInterviewFormOpen(true)}>
+              <Briefcase size={14} />
+              Add Interview
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setAssessmentFormOpen(true)}>
+              <Target size={14} />
+              Add Assessment
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-6 space-y-6">
           <div className="flex items-center justify-between">
@@ -1005,7 +1059,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
         </div>
       </Card>
 
-      <Card className="mt-6 p-6 space-y-4">
+            <Card className="mt-6 p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold text-foreground">Activity Timeline</h3>
@@ -1013,7 +1067,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
               Follow the story of this candidate across notes, interviews, and assessments.
             </p>
           </div>
-          {timelineItems.length > 0 && (
+          {timelineGroups.length > 0 && (
             <Button
               type="button"
               variant="ghost"
@@ -1026,7 +1080,7 @@ const createAssessment = useCreateAssessmentMutation(token, {
             </Button>
           )}
         </div>
-        {timelineItems.length > 0 && (
+        {timelineGroups.length > 0 && (
           <p className="text-xs text-muted-foreground">
             Tip: Use the quick actions on each entry to log a reminder without leaving the timeline.
           </p>
@@ -1036,37 +1090,54 @@ const createAssessment = useCreateAssessmentMutation(token, {
             Timeline hidden. Expand to review the latest notes, interviews, and assessments in order.
           </p>
         )}
-        {timelineItems.length === 0 ? (
+        {timelineGroups.length === 0 ? (
           <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
             No activity yet. As you add notes, interviews, or assessments, they will appear here in chronological order.
           </div>
         ) : timelineCollapsed ? null : (
-          <ol className="relative space-y-4 border-l border-border/60 pl-6">
-            {timelineItems.map((item) => {
-              const IconComponent =
-                item.type === 'note' ? MessageSquare : item.type === 'interview' ? Briefcase : Target;
-              return (
-                <li key={item.id} className="relative pl-4">
-                  <span className="absolute -left-[14px] top-2 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background">
-                    <IconComponent className="h-3.5 w-3.5 text-primary" />
-                  </span>
-                  <div className="space-y-2 rounded-lg border border-border bg-card/60 p-4 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{item.title}</p>
-                        <p className="text-xs text-muted-foreground">{item.description}</p>
-                      </div>
-                      <Badge className={item.tone}>{item.badge}</Badge>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>{formatDateTime(item.timestamp)}</span>
-                      {item.dueDate && <span>• Due {formatDate(item.dueDate)}</span>}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
+          <div className="space-y-4">
+            {timelineGroups.map((group) => (
+              <div key={group.dateLabel}>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                  {group.dateLabel}
+                </div>
+                <ol className="relative space-y-4 border-l border-border/60 pl-6">
+                  {group.items.map((item) => {
+                    const IconComponent =
+                      item.type === 'note' ? MessageSquare : item.type === 'interview' ? Briefcase : Target;
+                    return (
+                      <li key={item.id} className="relative pl-4">
+                        <span className="absolute -left-[14px] top-2 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background">
+                          <IconComponent className="h-3.5 w-3.5 text-primary" />
+                        </span>
+                        <div className="space-y-2 rounded-lg border border-border bg-card/60 p-4 shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                              <p className="text-xs text-muted-foreground">{item.description}</p>
+                            </div>
+                            <Badge className={item.tone}>{item.badge}</Badge>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>{formatDateTime(item.timestamp)}</span>
+                            {item.dueDate && <span>• Due {formatDate(item.dueDate)}</span>}
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                              onClick={() => handleTimelineFollowUp(item)}
+                            >
+                              <Bell size={12} />
+                              Follow up
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
 
@@ -1595,6 +1666,10 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
   </div>
 );
 export default CandidateDetailPage;
+
+
+
+
 
 
 
