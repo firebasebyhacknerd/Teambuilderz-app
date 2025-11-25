@@ -19,11 +19,20 @@ import {
 } from '../../lib/queryHooks';
 
 const numberFormatter = new Intl.NumberFormat();
-const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
-const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-});
+
+// Use client-safe date formatting
+const formatDate = (date) => {
+  if (typeof window === 'undefined') return '';
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
+};
+
+const formatDateTime = (date) => {
+  if (typeof window === 'undefined') return '';
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+};
 
 const rangeOptions = [
   { value: '7d', label: 'Last 7 days', days: 7 },
@@ -35,7 +44,7 @@ const rangeOptions = [
 const selectClass =
   'h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/40';
 
-const ApplicationActivityPage = ({ now }) => {
+const ApplicationActivityPage = () => {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [userName, setUserName] = useState('Admin');
@@ -64,7 +73,7 @@ const ApplicationActivityPage = ({ now }) => {
     }
   }, [router]);
 
-  const baseToday = useMemo(() => new Date(now || Date.now()), [now]);
+  const baseToday = useMemo(() => new Date(Date.now()), []);
 
   const rangeConfig = useMemo(() => {
     const toStr = (date) => date.toISOString().split('T')[0];
@@ -215,13 +224,29 @@ const ApplicationActivityPage = ({ now }) => {
     });
   }, [minApplications, report, searchTerm]);
   const generatedLabel = report?.generatedAt
-    ? dateTimeFormatter.format(new Date(report.generatedAt))
+    ? formatDateTime(new Date(report.generatedAt))
     : '—';
 
   const isLoading = reportLoading && !reportRefreshing;
 
+  // Debug: Log the current state
+  console.log('Application Activity Debug:', { 
+    token: token ? 'exists' : 'missing', 
+    userName, 
+    isLoading,
+    reportLoading,
+    reportData: report ? 'exists' : 'missing'
+  });
+
   if (!token) {
-    return null;
+    console.log('No token found, returning null');
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-muted-foreground">Loading authentication...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -252,7 +277,7 @@ const ApplicationActivityPage = ({ now }) => {
           <div>
             <p className="text-sm font-semibold text-foreground">Reporting Window</p>
             <p className="text-sm text-muted-foreground">
-              {dateFormatter.format(rangeConfig.startDate)} — {dateFormatter.format(rangeConfig.endDate)}
+              {formatDate(rangeConfig.startDate)} — {formatDate(rangeConfig.endDate)}
             </p>
             <p className="text-xs text-muted-foreground">Last updated {generatedLabel}</p>
           </div>
@@ -470,7 +495,7 @@ const ApplicationActivityPage = ({ now }) => {
             <Card className="p-4">
               <p className="text-sm text-muted-foreground">Busiest day</p>
               <p className="text-lg font-medium text-foreground">
-                {peakDay ? dateFormatter.format(new Date(peakDay.date)) : '—'}
+                {peakDay ? formatDate(new Date(peakDay.date)) : '—'}
               </p>
               <p className="text-xs text-muted-foreground">
                 {peakDay
@@ -558,7 +583,7 @@ const ApplicationActivityPage = ({ now }) => {
                         className="border-t border-border/70"
                       >
                         <td className="py-2 pr-4">
-                          {dateFormatter.format(new Date(entry.activityDate))}
+                          {formatDate(new Date(entry.activityDate))}
                         </td>
                         <td className="py-2 pr-4">{entry.recruiter.name}</td>
                         <td className="py-2 pr-4">{entry.candidate.name}</td>

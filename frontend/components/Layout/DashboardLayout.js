@@ -2,15 +2,14 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { ArrowLeft, Menu, ChevronLeft, ChevronRight, X, HelpCircle, Command, Moon, Sun, Monitor } from "lucide-react";
+import { ArrowLeft, Menu, ChevronLeft, ChevronRight, X, HelpCircle, Command } from "lucide-react";
 import { Button } from "../ui/button";
 import ActivityPulse from "../analytics/ActivityPulse";
 import { ThemeSelect } from "../ui/theme-toggle";
 import { motion, AnimatePresence } from "framer-motion";
-import { ThemeToggle } from "../../lib/theme";
-import MobileNav from "../ui/mobile-nav";
 import SearchInput from "../ui/search-input";
 import CommandPalette from "../CommandPalette";
+import Breadcrumb from "../Breadcrumb";
 
 const STORAGE_KEY = "tbz-sidebar";
 const HELP_LINK = "https://intranet.teambuilderz/policies";
@@ -22,6 +21,11 @@ const DashboardLayout = ({
   actions = null,
   onBack = null,
   quickActions: quickActionsProp = [],
+  breadcrumbs = [],
+  primaryAction = null,
+  secondaryActions = [],
+  environmentLabel = "Live environment",
+  showEnvironment = true,
   children,
 }) => {
   const router = useRouter();
@@ -128,6 +132,64 @@ const DashboardLayout = ({
     }
     setCommandPaletteOpen(false);
     setSearchValue("");
+  };
+
+  const normalizedPrimaryAction = useMemo(
+    () => (primaryAction && primaryAction.label ? primaryAction : null),
+    [primaryAction],
+  );
+
+  const normalizedSecondaryActions = useMemo(
+    () => (Array.isArray(secondaryActions) ? secondaryActions.filter((action) => action?.label) : []),
+    [secondaryActions],
+  );
+
+  const renderActionButton = (action, key, size = "sm", defaultVariant = "outline") => {
+    const { label, icon: Icon, onClick, href, variant, disabled } = action;
+    const resolvedVariant = variant || defaultVariant;
+    const handleClick = () => {
+      if (disabled) return;
+      if (href) {
+        router.push(href);
+        return;
+      }
+      if (typeof onClick === "function") {
+        onClick();
+      }
+    };
+
+    return (
+      <Button
+        key={key}
+        variant={resolvedVariant}
+        size={size}
+        className="gap-2"
+        onClick={handleClick}
+        disabled={disabled}
+      >
+        {Icon && <Icon size={16} />}
+        <span>{label}</span>
+      </Button>
+    );
+  };
+
+  const renderActionsGroup = (size = "sm", keyPrefix = "action") => {
+    const buttons = normalizedSecondaryActions.map((action, index) =>
+      renderActionButton(action, `${keyPrefix}-secondary-${index}`, size, action.variant || "outline"),
+    );
+
+    if (normalizedPrimaryAction) {
+      buttons.push(
+        renderActionButton(
+          normalizedPrimaryAction,
+          `${keyPrefix}-primary`,
+          size,
+          normalizedPrimaryAction.variant || "default",
+        ),
+      );
+    }
+
+    return buttons;
   };
 
   const renderedLinks = useMemo(
@@ -241,34 +303,47 @@ const DashboardLayout = ({
         className={`flex-1 ${mainOffset} bg-gradient-to-br from-[hsl(var(--background))] via-[hsl(var(--surface))] to-[hsl(var(--background))] transition-[margin] duration-200`}
       >
         <header className="sticky top-0 z-10 bg-background/80 backdrop-blur border-b border-border">
-          <div className="px-4 sm:px-6 py-4 flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="lg:hidden"
-                  onClick={() => setSidebarOpen(true)}
-                >
-                  <Menu size={20} />
-                </Button>
-                {onBack && (
-                  <Button variant="outline" size="sm" className="gap-2" onClick={onBack}>
-                    <ArrowLeft size={16} />
-                    Back
+          <div className="px-4 sm:px-6 py-4 space-y-3">
+            <CommandPalette />
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="lg:hidden"
+                    onClick={() => setSidebarOpen(true)}
+                  >
+                    <Menu size={20} />
                   </Button>
-                )}
-                <div>
+                  {onBack && (
+                    <Button variant="outline" size="sm" className="gap-2" onClick={onBack}>
+                      <ArrowLeft size={16} />
+                      Back
+                    </Button>
+                  )}
+                  {breadcrumbs?.length ? <Breadcrumb items={breadcrumbs} className="hidden sm:flex" /> : null}
+                </div>
+                <div className="space-y-1">
                   <h1 className="text-xl sm:text-2xl font-bold text-foreground">{title}</h1>
                   {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
                 </div>
+                {breadcrumbs?.length ? (
+                  <div className="sm:hidden">
+                    <Breadcrumb items={breadcrumbs} />
+                  </div>
+                ) : null}
               </div>
-              <div className="hidden lg:flex items-center gap-3">
-                <CommandPalette />
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <div className="hidden xl:block">
+                  <SearchInput placeholder="Search workspace" className="w-64" />
+                </div>
+                {renderActionsGroup("sm", "desktop")}
+                {actions}
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => setCommandPaletteOpen(true)}>
                   <Command size={16} />
                   Quick actions
-                  <span className="text-[11px] text-muted-foreground">⌘K</span>
+                  <span className="text-[11px] text-muted-foreground">Cmd/Ctrl + K</span>
                 </Button>
                 <Button variant="ghost" size="icon" asChild>
                   <a href={HELP_LINK} target="_blank" rel="noreferrer" aria-label="Open help center">
@@ -277,20 +352,19 @@ const DashboardLayout = ({
                 </Button>
                 <ThemeSelect hideLabel />
                 <ActivityPulse />
-                {actions}
               </div>
             </div>
-            {(actions || true) && (
+            {showEnvironment && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card/60 px-3 py-2">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wide">
                   <span className="flex h-2 w-2 rounded-full bg-emerald-500" />
-                  Live environment
+                  {environmentLabel}
                 </div>
-                <div className="flex flex-1 items-center gap-2 lg:hidden">
+                <div className="flex items-center gap-2 lg:hidden">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="gap-2 flex-1"
+                    className="gap-2"
                     onClick={() => setCommandPaletteOpen(true)}
                   >
                     <Command size={16} />
@@ -303,7 +377,6 @@ const DashboardLayout = ({
                   </Button>
                   <ThemeSelect hideLabel compact />
                   <ActivityPulse />
-                  {actions}
                 </div>
               </div>
             )}
@@ -376,7 +449,7 @@ const DashboardLayout = ({
               )}
             </div>
             <p className="text-[11px] text-muted-foreground">
-              Tip: Press <span className="rounded border border-border bg-muted px-1 py-0.5">⌘/Ctrl + K</span> to open this
+              Tip: Press <span className="rounded border border-border bg-muted px-1 py-0.5">Cmd/Ctrl + K</span> to open this
               palette from anywhere.
             </p>
           </div>
@@ -388,4 +461,5 @@ const DashboardLayout = ({
 
 export default DashboardLayout;
 export { DashboardLayout };
+
 

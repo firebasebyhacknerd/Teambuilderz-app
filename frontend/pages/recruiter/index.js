@@ -542,10 +542,86 @@ const RecruiterDashboard = () => {
   };
 
   const sidebarLinks = getSidebarLinks(role);
+  const scrollToAttendanceCard = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const target = document.querySelector('#leave-card');
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+  const triggerPipelineExport = useCallback(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    const exportButton = document.querySelector('[data-export-candidates]');
+    if (exportButton && typeof exportButton.click === 'function') {
+      exportButton.click();
+    }
+  }, []);
+  const headerBreadcrumbs = useMemo(
+    () => [
+      { label: 'Recruiter', href: '/recruiter' },
+      { label: 'Dashboard' },
+    ],
+    [],
+  );
+  const headerPrimaryAction = useMemo(
+    () => ({
+      label: 'Log attendance',
+      icon: CalendarCheck,
+      onClick: scrollToAttendanceCard,
+    }),
+    [scrollToAttendanceCard],
+  );
+  const headerSecondaryActions = useMemo(
+    () => [
+      {
+        label: 'View alerts',
+        icon: AlertTriangle,
+        onClick: () => router.push('/alerts'),
+        variant: 'outline',
+      },
+      {
+        label: 'Logout',
+        icon: LogOut,
+        onClick: handleLogout,
+        variant: 'ghost',
+      },
+    ],
+    [handleLogout, router],
+  );
+  const headerQuickActions = useMemo(
+    () => [
+      {
+        label: 'Log attendance',
+        description: 'Scroll to attendance & leave',
+        action: scrollToAttendanceCard,
+      },
+      {
+        label: 'Export pipeline',
+        description: 'Download the candidates PDF summary',
+        action: triggerPipelineExport,
+      },
+      {
+        label: 'Open candidates',
+        description: 'Jump to the candidates list',
+        action: () => router.push('/recruiter/candidates'),
+      },
+    ],
+    [router, scrollToAttendanceCard, triggerPipelineExport],
+  );
 
   if (loading || metricsLoading) {
     return (
-      <DashboardLayout title="Recruiter Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
+      <DashboardLayout
+        title="Recruiter Dashboard"
+        subtitle={`Welcome back, ${userName}`}
+        links={sidebarLinks}
+        breadcrumbs={headerBreadcrumbs}
+        primaryAction={headerPrimaryAction}
+        secondaryActions={headerSecondaryActions}
+        quickActions={headerQuickActions}
+      >
         <div className="space-y-6">
           {/* Stats cards skeleton */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -582,6 +658,10 @@ const RecruiterDashboard = () => {
       title="Recruiter Dashboard"
       subtitle={`Welcome back, ${userName}`}
       links={sidebarLinks}
+      breadcrumbs={headerBreadcrumbs}
+      primaryAction={headerPrimaryAction}
+      secondaryActions={headerSecondaryActions}
+      quickActions={headerQuickActions}
       actions={
         <div className="flex gap-2">
           <PDFExportButton
@@ -594,11 +674,8 @@ const RecruiterDashboard = () => {
             filename="dashboard-candidates-report"
             variant="outline"
             size="sm"
+            data-export-candidates
           />
-          <Button variant="outline" onClick={handleLogout} className="flex items-center gap-2">
-            <LogOut size={16} />
-            Logout
-          </Button>
         </div>
       }
     >
@@ -1214,10 +1291,6 @@ const ProgressRing = ({ percentage, value, target }) => {
 };
 
 export default RecruiterDashboard;
-
-
-
-
 
 
 

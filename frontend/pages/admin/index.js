@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Bell,
   CalendarClock,
+  RefreshCw,
   ChevronRight,
   UserCheck,
   Check,
@@ -653,10 +654,70 @@ const applicationsTodayDetails = (
   );
 
   const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
+  const headerBreadcrumbs = useMemo(
+    () => [
+      { label: 'Admin', href: '/admin' },
+      { label: 'Dashboard' },
+    ],
+    [],
+  );
+  const headerPrimaryAction = useMemo(
+    () => ({
+      label: 'Refresh data',
+      icon: RefreshCw,
+      onClick: handleExternalDashboardRefresh,
+    }),
+    [handleExternalDashboardRefresh],
+  );
+  const headerSecondaryActions = useMemo(
+    () => [
+      {
+        label: 'Reports',
+        icon: BarChart3,
+        onClick: () => router.push('/admin/reports'),
+        variant: 'outline',
+      },
+      {
+        label: 'Logout',
+        icon: LogOut,
+        onClick: handleLogout,
+        variant: 'ghost',
+      },
+    ],
+    [handleLogout, router],
+  );
+  const headerQuickActions = useMemo(
+    () => [
+      {
+        label: 'Refresh data',
+        description: 'Reload overview and activity feed',
+        action: handleExternalDashboardRefresh,
+      },
+      {
+        label: 'Pending approvals',
+        description: 'Jump to approvals panel',
+        action: () => focusPendingApprovals('applications'),
+      },
+      {
+        label: 'Open reports',
+        description: 'View performance & compliance reports',
+        action: () => router.push('/admin/reports'),
+      },
+    ],
+    [focusPendingApprovals, handleExternalDashboardRefresh, router],
+  );
 
   if (isLoading) {
     return (
-      <DashboardLayout title="Admin Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
+      <DashboardLayout
+        title="Admin Dashboard"
+        subtitle={`Welcome back, ${userName}`}
+        links={sidebarLinks}
+        breadcrumbs={headerBreadcrumbs}
+        primaryAction={headerPrimaryAction}
+        secondaryActions={headerSecondaryActions}
+        quickActions={headerQuickActions}
+      >
         <div className="h-48 flex items-center justify-center text-muted-foreground">Loading dashboard...</div>
       </DashboardLayout>
     );
@@ -667,12 +728,10 @@ const applicationsTodayDetails = (
       title="Admin Dashboard"
       subtitle={`Welcome back, ${userName}`}
       links={sidebarLinks}
-      actions={
-        <Button variant="outline" size="sm" className="gap-2" onClick={handleLogout}>
-          <LogOut className="h-4 w-4" />
-          Logout
-        </Button>
-      }
+      breadcrumbs={headerBreadcrumbs}
+      primaryAction={headerPrimaryAction}
+      secondaryActions={headerSecondaryActions}
+      quickActions={headerQuickActions}
     >
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
@@ -1826,9 +1885,6 @@ export async function getServerSideProps() {
 }
 
 export default AdminDashboard;
-
-
-
 
 
 
