@@ -34,8 +34,8 @@ const LeaderboardPage = () => {
 
   const { data, isLoading } = useLeaderboardQuery(token, Boolean(token));
 
-  const leaderboard = useMemo(() => data?.leaderboard ?? [], [data?.leaderboard]);
-  const generatedAt = useMemo(() => data?.generatedAt ?? null, [data?.generatedAt]);
+  const leaderboard = useMemo(() => data?.leaderboard || [], [data?.leaderboard]);
+  const generatedAt = useMemo(() => data?.generatedAt || null, [data?.generatedAt]);
 
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Admin') {
@@ -73,7 +73,7 @@ const LeaderboardPage = () => {
   }, [leaderboard]);
 
   const currentUserEntry = useMemo(
-    () => leaderboard.find((entry) => entry.name === userName) ?? null,
+    () => leaderboard.find((entry) => entry.name === userName) || null,
     [leaderboard, userName],
   );
 
@@ -81,7 +81,7 @@ const LeaderboardPage = () => {
     if (!currentUserEntry || currentUserEntry.rank <= 1) {
       return null;
     }
-    return leaderboard.find((entry) => entry.rank === currentUserEntry.rank - 1) ?? null;
+    return leaderboard.find((entry) => entry.rank === currentUserEntry.rank - 1) || null;
   }, [currentUserEntry, leaderboard]);
 
   const quotaProgress = useMemo(() => {
@@ -180,7 +180,7 @@ const LeaderboardPage = () => {
                 </div>
                 <Badge variant="outline" className="gap-1">
                   <Flame className="h-3.5 w-3.5 text-amber-500" />
-                  {currentUserEntry.todayApplications}/{currentUserEntry.dailyQuota ?? '—'} today
+                  {currentUserEntry.todayApplications}/{currentUserEntry.dailyQuota || '—'} today
                 </Badge>
               </div>
               <div className="space-y-2">
@@ -213,9 +213,7 @@ const LeaderboardPage = () => {
           )}
 
           {topPerformer && (
-            <Card
-              role="button"
-              tabIndex={0}
+            <button
               onClick={() => handleNavigateToRecruiter(topPerformer.recruiterId)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -223,31 +221,36 @@ const LeaderboardPage = () => {
                   handleNavigateToRecruiter(topPerformer.recruiterId);
                 }
               }}
-              className="p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-amber-100 via-white to-amber-100 border-amber-200 cursor-pointer transition hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+              className="w-full text-left p-6 border-0 bg-transparent cursor-pointer"
+              aria-label={`View ${topPerformer.name}'s details`}
             >
-              <div className="flex items-center gap-4">
-                <div className="h-12 w-12 rounded-full bg-amber-500/20 flex items-center justify-center">
-                  <Trophy className="h-7 w-7 text-amber-600" />
+              <Card
+                className="p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gradient-to-r from-amber-100 via-white to-amber-100 border-amber-200 cursor-pointer transition hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-400"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-full bg-amber-500/20 flex items-center justify-center">
+                    <Trophy className="h-7 w-7 text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground uppercase">Top Performer</p>
+                    <p className="text-xl font-semibold text-foreground">{topPerformer.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {topPerformer.weekApplications} applications this week {'\u00B7'} {topPerformer.todayApplications} today
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground uppercase">Top Performer</p>
-                  <p className="text-xl font-semibold text-foreground">{topPerformer.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {topPerformer.weekApplications} applications this week {'\u00B7'} {topPerformer.todayApplications} today
-                  </p>
+                <div className="flex items-center gap-6 text-sm text-muted-foreground">
+                  <div className="flex flex-col text-right">
+                    <span className="text-xs uppercase">Active Candidates</span>
+                    <span className="text-lg font-semibold text-foreground">{topPerformer.activeCandidates}</span>
+                  </div>
+                  <div className="flex flex-col text-right">
+                    <span className="text-xs uppercase">Daily Quota</span>
+                    <span className="text-lg font-semibold text-foreground">{topPerformer.dailyQuota}</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-6 text-sm text-muted-foreground">
-                <div className="flex flex-col text-right">
-                  <span className="text-xs uppercase">Active Candidates</span>
-                  <span className="text-lg font-semibold text-foreground">{topPerformer.activeCandidates}</span>
-                </div>
-                <div className="flex flex-col text-right">
-                  <span className="text-xs uppercase">Daily Quota</span>
-                  <span className="text-lg font-semibold text-foreground">{topPerformer.dailyQuota}</span>
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </button>
           )}
 
           <Card className="p-0">
@@ -277,7 +280,7 @@ const LeaderboardPage = () => {
                             #{entry.rank}
                             {entry.rank === 1 && <Award className="h-3 w-3" />}
                           </Badge>
-                      </td>
+                        </td>
                       <td className="px-6 py-3">
                         <button
                           type="button"
@@ -323,7 +326,7 @@ const LeaderboardPage = () => {
 
 const SummaryCard = ({ icon, title, value, accent }) => (
   <Card className="p-5 flex items-center gap-3">
-    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent ?? 'bg-muted text-foreground'}`}>
+    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${accent || 'bg-muted text-foreground'}`}>
       {icon}
     </div>
     <div>

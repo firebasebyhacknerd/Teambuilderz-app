@@ -23,6 +23,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
 import { Label } from '../../../components/ui/label';
 import Textarea from '../../../components/ui/textarea';
+import { ConfirmDialog } from '../../../components/ui/confirm-dialog';
 import DashboardLayout from '../../../components/Layout/DashboardLayout';
 import API_URL from '../../../lib/api';
 import { track } from '../../../lib/analytics';
@@ -74,6 +75,8 @@ const CandidateDetailPage = () => {
   const [noteFollowUpDescription, setNoteFollowUpDescription] = useState('');
   const [noteFollowUpPriority, setNoteFollowUpPriority] = useState(1);
   const [noteMessage, setNoteMessage] = useState(null);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [noteToDelete, setNoteToDelete] = useState(null);
   const [editingNoteId, setEditingNoteId] = useState(null);
   const [defaultTimezone, setDefaultTimezone] = useState('UTC');
   const [interviewFormOpen, setInterviewFormOpen] = useState(false);
@@ -618,9 +621,16 @@ const createAssessment = useCreateAssessmentMutation(token, {
   };
 
   const handleDeleteNote = (noteId) => {
-    const confirmDelete = window.confirm('Are you sure you want to delete this note?');
-    if (!confirmDelete) return;
-    deleteNote.mutate(noteId);
+    setNoteToDelete(noteId);
+    setConfirmDialogOpen(true);
+  };
+
+  const confirmDeleteNote = () => {
+    if (noteToDelete) {
+      deleteNote.mutate(noteToDelete);
+    }
+    setConfirmDialogOpen(false);
+    setNoteToDelete(null);
   };
 
   const formatDateTime = useCallback((value) => formatDateTimeUtil(value), []);
@@ -755,19 +765,20 @@ const createAssessment = useCreateAssessmentMutation(token, {
   }
 
   return (
-    <DashboardLayout
+    <>
+      <DashboardLayout
       title={candidate.name}
       subtitle={candidate.email}
       links={sidebarLinks}
       onBack={() => router.push('/recruiter')}
       actions={
-        <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>{stageLabel}</Badge>
+        <Badge className={stageBadges[candidate.current_stage] || 'bg-blue-100 text-blue-800'}>{stageLabel}</Badge>
       }
     >
       <Card className="mb-6 p-4 sm:p-5 flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-3 justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <Badge className={stageBadges[candidate.current_stage] ?? 'bg-blue-100 text-blue-800'}>
+            <Badge className={stageBadges[candidate.current_stage] || 'bg-blue-100 text-blue-800'}>
               {stageLabel}
             </Badge>
             <div className="text-sm text-muted-foreground">
@@ -1585,7 +1596,7 @@ const InfoTile = ({ icon, label, value }) => (
 );
 
 const StatBadge = ({ label, value, suffix = '', tone }) => (
-  <div className={`rounded-lg px-4 py-3 text-center ${tone ?? 'bg-muted text-foreground'}`}>
+  <div className={`rounded-lg px-4 py-3 text-center ${tone || 'bg-muted text-foreground'}`}>
     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
     <p className="text-xl font-semibold text-foreground">
       {value}
@@ -1618,7 +1629,7 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
             )}
           </p>
           <p className="text-xs text-muted-foreground">
-            {formatDateTime(note.createdAt)} - {note.author?.role ?? 'Contributor'}
+            {formatDateTime(note.createdAt)} - {note.author?.role || 'Contributor'}
           </p>
         </div>
       </div>
@@ -1658,7 +1669,21 @@ const NoteItem = ({ note, formatDateTime, canEdit, canDelete, onEdit, onDelete, 
       </div>
     )}
   </div>
-);
+    </DashboardLayout>
+  
+  <ConfirmDialog
+    open={confirmDialogOpen}
+    onOpenChange={setConfirmDialogOpen}
+    title="Delete Note"
+    description="Are you sure you want to delete this note? This action cannot be undone."
+    confirmText="Delete"
+    cancelText="Cancel"
+    variant="destructive"
+    onConfirm={confirmDeleteNote}
+    icon={Trash2}
+  />
+</>
+
 export default CandidateDetailPage;
 
 

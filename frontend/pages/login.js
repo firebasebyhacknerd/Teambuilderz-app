@@ -11,8 +11,9 @@ import {
   Sparkles,
   CheckCircle,
 } from "lucide-react";
-import { Card } from "../components/ui/card";
-import { Button } from "../components/ui/button";
+import { Card } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { handleError } from '../components/ui/error-handler';
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import API_URL from "../lib/api";
@@ -108,11 +109,7 @@ const LoginPage = () => {
         router.replace(payload?.role === "Admin" ? "/admin" : "/recruiter");
       }, 1000);
     } catch (loginError) {
-      const message =
-        loginError instanceof Error
-          ? loginError.message
-          : "Unexpected error during login. Please try again.";
-      setErrorMessage(message);
+      handleError(loginError, 'Unable to log in. Please verify your credentials.');
     } finally {
       setSubmitting(false);
     }

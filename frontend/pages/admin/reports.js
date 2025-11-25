@@ -1,13 +1,15 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { FileText, Users, Calendar, TrendingUp, Briefcase, Phone } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import PDFExportPanel from '../../components/ui/pdf-export-panel';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
-import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 
 const ReportsPage = () => {
   const [selectedReport, setSelectedReport] = useState(null);
+
+  const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
 
   const reportTypes = [
     {
@@ -61,7 +63,7 @@ const ReportsPage = () => {
     <DashboardLayout 
       title="Reports"
       subtitle="Generate and export system reports"
-      links={getAdminSidebarLinks()}
+      links={sidebarLinks}
     >
       <div className="space-y-6">
         {/* Report Type Selection */}

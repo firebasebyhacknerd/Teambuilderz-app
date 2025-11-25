@@ -15,6 +15,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
+import { ConfirmDialog } from '../../components/ui/confirm-dialog';
 import {
   useUsersQuery,
   useCreateUserMutation,
@@ -40,6 +41,8 @@ const AdminRecruitersPage = () => {
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [formMessage, setFormMessage] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [recruiterToDelete, setRecruiterToDelete] = useState(null);
 
   const createFormInitial = () => ({
     name: '',
@@ -224,11 +227,16 @@ const recruiters = useMemo(
   const handleDelete = () => {
     if (!selectedUserId) return;
     const recruiter = recruiters.find((user) => user.id === selectedUserId);
-    const confirmed = window.confirm(
-      `Remove ${recruiter?.name ?? 'this recruiter'} from the team? This cannot be undone.`
-    );
-    if (!confirmed) return;
-    deleteUser.mutate(selectedUserId);
+    setRecruiterToDelete(recruiter);
+    setConfirmDialogOpen(true);
+  };
+
+  const confirmDeleteRecruiter = () => {
+    if (selectedUserId) {
+      deleteUser.mutate(selectedUserId);
+    }
+    setConfirmDialogOpen(false);
+    setRecruiterToDelete(null);
   };
 
   const handleCreateSubmit = (event) => {
@@ -274,7 +282,8 @@ const isCreateMutating = createUser.isPending;
   }
 
   return (
-    <Dialog open={createOpen} onOpenChange={handleCreateDialogToggle}>
+    <>
+      <Dialog open={createOpen} onOpenChange={handleCreateDialogToggle}>
       <DashboardLayout
         title="Team Management"
         subtitle={`Manage recruiter access and quotas - Signed in as ${userName}`}
@@ -608,6 +617,19 @@ const isCreateMutating = createUser.isPending;
         </DialogContent>
       </DashboardLayout>
     </Dialog>
+    
+    <ConfirmDialog
+      open={confirmDialogOpen}
+      onOpenChange={setConfirmDialogOpen}
+      title="Remove Recruiter"
+      description={`Remove ${recruiterToDelete?.name ?? 'this recruiter'} from the team? This cannot be undone.`}
+      confirmText="Remove"
+      cancelText="Cancel"
+      variant="destructive"
+      onConfirm={confirmDeleteRecruiter}
+      icon={Trash2}
+    />
+    </>
   );
 };
 

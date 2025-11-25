@@ -295,7 +295,7 @@ const RecruiterProfilePage = () => {
                       key={candidate.id}
                       type="button"
                       onClick={() => router.push(`/recruiter/candidate/${candidate.id}`)}
-                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-muted transition"
+                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-surface-hover transition"
                     >
                       <div className="flex flex-col gap-1">
                         <span className="text-sm font-semibold text-foreground">{candidate.name}</span>
@@ -353,7 +353,7 @@ const RecruiterProfilePage = () => {
                       key={application.id}
                       type="button"
                       onClick={() => router.push(`/recruiter/candidate/${application.candidateId}`)}
-                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-muted transition"
+                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-surface-hover transition"
                     >
                       <div className="flex flex-col gap-1">
                         <span className="text-sm font-semibold text-foreground">{application.companyName}</span>
@@ -417,7 +417,7 @@ const RecruiterProfilePage = () => {
                       key={interview.id}
                       type="button"
                       onClick={() => router.push(`/recruiter/candidate/${interview.candidateId}`)}
-                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-muted transition"
+                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-surface-hover transition"
                     >
                       <div className="flex flex-col gap-1">
                         <span className="text-sm font-semibold text-foreground">
@@ -473,7 +473,7 @@ const RecruiterProfilePage = () => {
                       key={assessment.id}
                       type="button"
                       onClick={() => router.push(`/recruiter/candidate/${assessment.candidateId}`)}
-                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-muted transition"
+                      className="w-full flex items-center justify-between gap-3 rounded-md border border-border bg-card/60 px-4 py-3 text-left hover:bg-surface-hover transition"
                     >
                       <div className="flex flex-col gap-1">
                         <span className="text-sm font-semibold text-foreground">

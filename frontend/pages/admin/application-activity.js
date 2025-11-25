@@ -5,7 +5,7 @@ import RecruiterBarChart from '../../components/analytics/RecruiterBarChart';
 import CandidateBarChart from '../../components/analytics/CandidateBarChart';
 import ApplicationTrendChart from '../../components/analytics/ApplicationTrendChart';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
-import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -144,7 +144,7 @@ const ApplicationActivityPage = ({ now }) => {
     [candidates],
   );
 
-  const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
+  const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');

@@ -716,10 +716,20 @@ const ApplicationsPage = () => {
           ) : filteredApplications.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title="No Applications Found"
-              description="It looks like you haven't logged any applications yet. Get started by adding a new submission."
+              title={hasActiveFilters ? 'No applications match your filters' : 'No applications yet'}
+              description={
+                hasActiveFilters
+                  ? 'Try adjusting your search terms or status filter to find what you\'re looking for.'
+                  : 'Start tracking your recruiting progress by logging your first job application. Keep a record of every submission to stay organized.'
+              }
               action={
-                <LogApplicationModal token={token} onApplicationLogged={handleApplicationLogged} />
+                hasActiveFilters ? (
+                  <Button variant="outline" size="sm" onClick={resetFilters}>
+                    Clear filters
+                  </Button>
+                ) : (
+                  <LogApplicationModal token={token} onApplicationLogged={handleApplicationLogged} />
+                )
               }
             />
           ) : (
@@ -736,37 +746,37 @@ const ApplicationsPage = () => {
                 </div>
               )}
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-muted-foreground">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">Candidate</th>
-                    <th className="px-4 py-3 text-left font-medium">Recruiter</th>
-                    <th className="px-4 py-3 text-left font-medium">Company</th>
-                    <th className="px-4 py-3 text-left font-medium">Job Title</th>
-                    <th className="px-4 py-3 text-left font-medium">Channel</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-left font-medium">Applied On</th>
-                    <th className="px-4 py-3 text-right font-medium">Count</th>
-                    <th className="px-4 py-3 text-left font-medium">Approval</th>
-                    <th className="px-4 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredApplications.map((application) => {
-                    const isEditing = editingApplicationId === application.id;
-                    const normalizedDate = application.application_date
-                      ? new Date(application.application_date).toISOString().split('T')[0]
-                      : null;
-                    const isApproved = Boolean(application.is_approved);
-                    const canEdit =
-                      userRole === 'Admin' ||
-                      (!isApproved && (normalizedDate ? normalizedDate === today : true));
-                    const approvalUpdating =
-                      approveApplication.isPending &&
-                      approveApplication.variables?.applicationId === application.id;
-                    const rowClasses = `border-b border-border transition ${
-                      isEditing ? 'bg-muted/30' : 'hover:bg-accent/40'
-                    } ${isApproved ? '' : 'border-l-4 border-l-amber-400'}`;
+                <table className="w-full">
+                  <thead className="bg-muted/50 text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium">Candidate</th>
+                      <th className="px-4 py-3 text-left font-medium">Recruiter</th>
+                      <th className="px-4 py-3 text-left font-medium">Company</th>
+                      <th className="px-4 py-3 text-left font-medium">Job Title</th>
+                      <th className="px-4 py-3 text-left font-medium">Channel</th>
+                      <th className="px-4 py-3 text-left font-medium">Status</th>
+                      <th className="px-4 py-3 text-left font-medium">Applied On</th>
+                      <th className="px-4 py-3 text-right font-medium">Count</th>
+                      <th className="px-4 py-3 text-left font-medium">Approval</th>
+                      <th className="px-4 py-3 text-right font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredApplications.map((application) => {
+                      const isEditing = editingApplicationId === application.id;
+                      const normalizedDate = application.application_date
+                        ? new Date(application.application_date).toISOString().split('T')[0]
+                        : null;
+                      const isApproved = Boolean(application.is_approved);
+                      const canEdit =
+                        userRole === 'Admin' ||
+                        (!isApproved && (normalizedDate ? normalizedDate === today : true));
+                      const approvalUpdating =
+                        approveApplication.isPending &&
+                        approveApplication.variables?.applicationId === application.id;
+                      const rowClasses = `border-b border-border transition ${
+                        isEditing ? 'bg-muted/30' : 'hover:bg-accent/40'
+                      } ${isApproved ? '' : 'border-l-4 border-l-amber-400'}`;
 
                     return (
                       <React.Fragment key={application.id}>

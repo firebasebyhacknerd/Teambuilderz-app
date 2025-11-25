@@ -72,6 +72,9 @@ const AlertsPage = () => {
     [alerts, statusFilter]
   );
 
+  const hasActiveFilters = Boolean(statusFilter);
+  const resetFilters = () => setStatusFilter('');
+
   const sidebarLinks = useMemo(() => {
     if (userRole === 'Recruiter') {
       return [
@@ -222,8 +225,19 @@ const AlertsPage = () => {
         {filteredAlerts.length === 0 ? (
           <Card className="p-12 text-center">
             <Bell size={48} className="mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">No alerts found</h3>
-            <p className="text-muted-foreground">You&apos;re all caught up! No alerts to show.</p>
+            <h3 className="text-lg font-medium text-foreground mb-2">
+              {hasActiveFilters ? 'No alerts match your filters' : 'All caught up!'}
+            </h3>
+            <p className="text-muted-foreground">
+              {hasActiveFilters
+                ? 'Try adjusting your search terms or filters to find the alerts you\'re looking for.'
+                : 'Great job! You\'ve handled all your alerts. Check back later for new notifications.'}
+            </p>
+            {hasActiveFilters && (
+              <Button variant="outline" size="sm" className="mt-4" onClick={resetFilters}>
+                Clear filters
+              </Button>
+            )}
           </Card>
         ) : (
           filteredAlerts.map((alert) => (

@@ -297,13 +297,12 @@ const CandidatesPage = () => {
               const stageLabelText = stageLabel(stage);
 
               return (
-                <div
+                <button
                   key={candidate.id}
-                  role="button"
-                  tabIndex={0}
                   onClick={() => navigateToCandidate(candidate.id)}
                   onKeyDown={(event) => handleCandidateKeyDown(event, candidate.id)}
-                  className="w-full text-left px-4 py-3 sm:px-6 sm:py-4 hover:bg-accent transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                  className="w-full text-left px-4 py-3 sm:px-6 sm:py-4 hover:bg-surface-hover transition flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-0 bg-transparent cursor-pointer"
+                  aria-label={`View ${candidate.name}'s details`}
                 >
                   <div>
                     <p className="text-sm font-semibold text-foreground">{candidate.name}</p>
@@ -338,7 +337,7 @@ const CandidatesPage = () => {
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>

@@ -23,7 +23,7 @@ import {
   useUsersQuery,
 } from '../../lib/queryHooks';
 import { emitRefresh, REFRESH_CHANNELS } from '../../lib/refreshBus';
-import { getAdminSidebarLinks } from '../../lib/adminSidebarLinks';
+import { getSidebarLinks } from '../../lib/sidebarLinks';
 import API_URL from '../../lib/api';
 
 const formatDateIso = (date) => {
@@ -140,7 +140,7 @@ const AdminAttendancePage = ({ now }) => {
   const [activeSummary, setActiveSummary] = useState(null);
   const [previewData, setPreviewData] = useState(null);
   const [previewError, setPreviewError] = useState(null);
-  const sidebarLinks = useMemo(() => getAdminSidebarLinks(), []);
+  const sidebarLinks = useMemo(() => getSidebarLinks('Admin'), []);
   const templateCsv = useMemo(
     () =>
       [

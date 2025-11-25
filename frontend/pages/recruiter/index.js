@@ -21,8 +21,10 @@ import {
 } from 'lucide-react';
 import { Card } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { handleError, handleSuccess } from '../../components/ui/error-handler';
 import { Badge } from '../../components/ui/badge';
 import { Label } from '../../components/ui/label';
+import { Skeleton } from '../../components/ui/skeleton';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
 import API_URL from '../../lib/api';
 import PDFExportButton from '../../components/ui/pdf-export-button';
@@ -201,7 +203,7 @@ const RecruiterDashboard = () => {
       }
       setCandidates(await response.json());
     } catch (error) {
-      console.error(error.message);
+      handleError(error, 'Failed to fetch candidates');
     }
   }, [authHeaders, router]);
 
@@ -289,7 +291,7 @@ const RecruiterDashboard = () => {
 
   useEffect(() => {
     if (profileError) {
-      console.error('Unable to load recruiter metrics.');
+      handleError(profileError, 'Unable to load recruiter metrics');
     }
   }, [profileError]);
 
@@ -544,7 +546,33 @@ const RecruiterDashboard = () => {
   if (loading || metricsLoading) {
     return (
       <DashboardLayout title="Recruiter Dashboard" subtitle={`Welcome back, ${userName}`} links={sidebarLinks}>
-        <div className="h-48 flex items-center justify-center text-muted-foreground">Loading dashboard...</div>
+        <div className="space-y-6">
+          {/* Stats cards skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="p-4">
+                <Skeleton className="h-4 w-1/2 mb-2" />
+                <Skeleton className="h-8 w-3/4" />
+              </Card>
+            ))}
+          </div>
+          
+          {/* Activity feed skeleton */}
+          <Card className="p-4">
+            <Skeleton className="h-6 w-1/3 mb-4" />
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <Skeleton className="h-10 w-10 rounded-full" />
+                  <div className="flex-1">
+                    <Skeleton className="h-4 w-2/3 mb-1" />
+                    <Skeleton className="h-3 w-1/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
       </DashboardLayout>
     );
   }

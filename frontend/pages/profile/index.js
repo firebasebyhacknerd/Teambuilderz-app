@@ -3,9 +3,10 @@ import { useRouter } from 'next/router';
 import { useCallback } from 'react';
 import { AlertTriangle, CircleUser, FileText, Home, Target, TrendingUp, Users } from 'lucide-react';
 import DashboardLayout from '../../components/Layout/DashboardLayout';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { handleError } from '../components/ui/error-handler';
 import { Label } from '../../components/ui/label';
 import { track } from '../../lib/analytics';
 import API_URL from '../../lib/api';
@@ -70,7 +71,7 @@ export default function ProfilePage() {
       }));
       track('profile_view', { role: data.role });
     } catch (err) {
-      setError(err.message);
+      handleError(err, 'Unable to load profile');
     } finally {
       setLoading(false);
     }
@@ -167,7 +168,7 @@ export default function ProfilePage() {
       emitRefresh(REFRESH_CHANNELS.PROFILE);
       emitRefresh(REFRESH_CHANNELS.DASHBOARD);
     } catch (err) {
-      setError(err.message);
+      handleError(err, 'Unable to update profile');
       track('profile_update_error', { message: err.message });
     } finally {
       setSaving(false);

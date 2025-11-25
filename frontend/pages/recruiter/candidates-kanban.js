@@ -9,6 +9,7 @@ import useAuthState from '../../lib/useAuthState';
 import API_URL from '../../lib/api';
 import { useCandidatesQuery } from '../../lib/queryHooks';
 import { getSidebarLinks } from '../../lib/sidebarLinks';
+import { handleError } from '../../../components/ui/error-handler';
 
 const CandidatesKanbanPage = () => {
   const router = useRouter();
@@ -58,8 +59,7 @@ const CandidatesKanbanPage = () => {
         // Refetch candidates
         toast.success('Candidate stage updated');
       } catch (err) {
-        console.error('Error updating candidate:', err);
-        toast.error('Failed to update candidate stage');
+        handleError(err, 'Failed to update candidate stage');
       }
     },
     [token]

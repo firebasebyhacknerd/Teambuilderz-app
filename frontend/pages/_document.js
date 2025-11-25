@@ -38,7 +38,11 @@ export default function Document() {
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@500;600;700&display=swap"
           rel="stylesheet"
         />
-        <script dangerouslySetInnerHTML={{ __html: themeInitializer }} />
+        <script 
+          dangerouslySetInnerHTML={{ 
+            __html: themeInitializer.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+          }} 
+        />
       </Head>
       <body>
         <Main />
